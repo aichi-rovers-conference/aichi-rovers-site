@@ -1,0 +1,66 @@
+[
+  {
+    "date": "2025-11-09",
+    "round": 4,
+    "reportUrl": "/arc/conference/r7/4",
+    "title": "第４回 定例会（R7）",
+    "youtubeId": "YOUR_VIDEO_ID_R7_4",
+    "thumb": "/images/meetings/r6-1.jpg"
+  },
+  {
+  "date": "2025-08-10",
+  "round": 3,
+  "reportUrl": "/arc/conference/2025/3",
+  "title": "第３回 定例会・交流会（R7）",
+  "youtubeId": "YOUR_VIDEO_ID_R7_3",
+  "thumb": "/images/meetings/r7-3.jpg",
+  "summary": "午前は分科会、午後はゲーム交流を実施。各地区から活発な意見交換が行われました。",
+  "location": "○○県立青少年センター",
+  "participants": 68,
+  "gallery": [
+    "/images/meetings/r7-3-1.jpg",
+    "/images/meetings/r7-3-2.jpg",
+    "/images/meetings/r7-3-3.jpg"
+  ]
+},
+  {
+    "date": "2025-05-18",
+    "round": 2,
+    "reportUrl": "/arc/conference/r7/2",
+    "thumb": "/images/meetings/r7-2.jpg"
+  },
+  {
+    "date": "2025-04-13",
+    "round": 1,
+    "reportUrl": "/arc/conference/r7/1",
+    "thumb": "/images/meetings/r7-1.jpg"
+  },
+
+  {
+    "date": "2024-11-12",
+    "round": 4,
+    "reportUrl": "/arc/conference/r6/4",
+    "title": "第４回 定例会（R6）",
+    "youtubeId": "YOUR_VIDEO_ID_R6_4",
+    "thumb": "/images/meetings/r6-4.jpg"
+  },
+  {
+    "date": "2024-09-01",
+    "round": 3,
+    "reportUrl": "/arc/conference/r6/3",
+    "title": "第３回 定例会・交流会（R6）",
+    "thumb": "/images/meetings/r6-3.jpg"
+  },
+  {
+    "date": "2024-06-23",
+    "round": 2,
+    "reportUrl": "/arc/conference/r6/2",
+    "thumb": "/images/meetings/r6-2.jpg"
+  },
+  {
+    "date": "2024-04-28",
+    "round": 1,
+    "reportUrl": "/arc/conference/r6/1",
+    "thumb": "/images/meetings/r6-1.jpg"
+  }
+]

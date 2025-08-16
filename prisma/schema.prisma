@@ -1,0 +1,272 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+/**
+ * ✅ 日本語ラベルは @map でDB値にマッピング（キーは英数字と_のみ）
+ */
+enum District {
+  NAGOYA_CHIKUSA @map("名古屋千種地区")
+  NAGOYA_SEIBU   @map("名古屋西部地区")
+  NAGOYA_HOKUTO  @map("名古屋北斗地区")
+  NAGOYA_TATSUMI @map("名古屋巽地区")
+  OWARI_NISHI    @map("尾張西地区")
+  OWARI_HIGASHI  @map("尾張東地区")
+  OWARI_MINAMI   @map("尾張南地区")
+  CHITA_HOKUBU   @map("知多北部地区")
+  CHITA_HIGASHI  @map("知多東地区")
+  CHITA_SEINAN   @map("知多西南地区")
+  TOYOTA         @map("豊田地区")
+  MIKAWA_AOI     @map("三河葵地区")
+  HEKIKAI        @map("碧海地区")
+  HONOKUNI       @map("穂の国地区")
+  OTHERS         @map("その他地区")
+}
+
+model ConferenceRound {
+  id        String   @id @default(cuid())
+  fy        String                 // 例: "2025" or "R6"（どちらでもOK）
+  round     String                 // 例: "01" "02" …（ゼロ埋め推奨）
+  title     String
+  subtitle  String?
+  heroUrl   String?
+  intro     String?
+  sections  Json     @default("[]") // [{ id, type, title, body } | { id, type:'timeline', title, items: [...] }]
+  gallery   Json     @default("[]") // [{ id, url, caption }]
+  published Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([fy, round])
+  @@index([fy, round])
+}
+
+
+model User {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  passwordHash String
+  role         Role     @default(EDITOR)
+  isActive     Boolean  @default(true)
+  isSuper      Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+enum QuestionType {
+  RADIO
+  CHECKBOX
+  TEXT
+  SCALE
+  RATING
+}
+
+model Participant {
+  id        String   @id @default(cuid())
+  name      String
+  troop     String
+  rsAge     Int
+  district  District
+  email     String?  @unique
+  createdAt DateTime @default(now())
+
+  attendance  Attendance[]
+  emailQueues EmailQueue[]
+  emailTokens EmailToken[]
+}
+
+/**
+ * 送信ステータスの enum は先に定義しておくと見通し良いです
+ */
+enum EmailStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model EmailQueue {
+  id            String      @id @default(cuid())
+  participantId String
+  meetingCode   String
+  to            String
+  subject       String
+  body          String
+  status        EmailStatus @default(PENDING)
+  error         String?
+  queuedAt      DateTime    @default(now())
+  sentAt        DateTime?
+
+  participant Participant @relation(fields: [participantId], references: [id])
+
+  @@index([status, queuedAt])
+  @@index([participantId, meetingCode])
+}
+
+model EmailToken {
+  id            String    @id @default(cuid())
+  token         String    @unique
+  participantId String
+  meetingCode   String
+  expiresAt     DateTime
+  usedAt        DateTime?
+
+  participant Participant @relation(fields: [participantId], references: [id])
+
+  @@index([participantId, meetingCode])
+}
+
+model MeetingSheet {
+  id        String   @id @default(cuid())
+  key       String   @unique // 例: "default"
+  data      Json // { meetings: [...], peopleByRegion: {...} }
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Meeting {
+  id        String   @id @default(cuid())
+  title     String
+  date      DateTime
+  reiwa     Int // 例: R5=5, R6=6…
+  seq       Int // 同年度内の通番（1,2,3…）
+  code      String   @unique // 例: "R6-03"
+  createdAt DateTime @default(now())
+
+  attendance Attendance[]
+
+  @@unique([reiwa, seq])
+  @@index([reiwa, seq])
+  @@index([date])
+}
+
+model Attendance {
+  id            String   @id @default(cuid())
+  meetingId     String
+  participantId String
+  checkedAt     DateTime @default(now())
+  via           String? // "qr" | "manual" など
+
+  meeting     Meeting     @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  participant Participant @relation(fields: [participantId], references: [id])
+
+  @@unique([meetingId, participantId]) // 二重チェックイン防止
+  @@index([meetingId, checkedAt])
+}
+
+model Poll {
+  id          String       @id @default(cuid())
+  title       String
+  desc        String?
+  isPublic    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  closesAt    DateTime?
+  questions   Question[]
+  submissions Submission[]
+
+  @@index([createdAt])
+}
+
+model Question {
+  id     String @id @default(cuid())
+  pollId String
+  poll   Poll   @relation(fields: [pollId], references: [id], onDelete: Cascade)
+
+  index    Int
+  type     QuestionType
+  title    String
+  required Boolean      @default(false)
+
+  config  Json?
+  choices Choice[]
+  answers Answer[]
+
+  @@unique([pollId, index])
+  @@index([pollId, index])
+}
+
+model Choice {
+  id         String   @id @default(cuid())
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  index Int
+  label String
+
+  answers       Answer[]       @relation("ChoiceAnswers")
+  answerChoices AnswerChoice[]
+
+  @@unique([questionId, index])
+  @@index([questionId, index])
+}
+
+model FireScore {
+  id        String   @id @default(cuid())
+  name      String
+  score     Int
+  createdAt DateTime @default(now())
+
+  @@index([score, createdAt])
+}
+
+model Submission {
+  id          String   @id @default(cuid())
+  pollId      String
+  poll        Poll     @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  fingerprint String
+  createdAt   DateTime @default(now())
+
+  answers Answer[]
+
+  @@unique([pollId, fingerprint])
+  @@index([pollId, createdAt])
+}
+
+model Answer {
+  id           String     @id @default(cuid())
+  submissionId String
+  questionId   String
+  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  question     Question   @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  // radio
+  choiceId String?
+  choice   Choice? @relation("ChoiceAnswers", fields: [choiceId], references: [id])
+
+  // checkbox
+  choices AnswerChoice[]
+
+  // text
+  text String?
+
+  // scale
+  scaleValue Int?
+
+  // rating
+  ratingValue Int?
+
+  createdAt DateTime @default(now())
+
+  @@index([submissionId, questionId])
+  @@index([choiceId])
+}
+
+model AnswerChoice {
+  answerId String
+  choiceId String
+
+  answer Answer @relation(fields: [answerId], references: [id], onDelete: Cascade)
+  choice Choice @relation(fields: [choiceId], references: [id], onDelete: Cascade)
+
+  @@id([answerId, choiceId])
+}

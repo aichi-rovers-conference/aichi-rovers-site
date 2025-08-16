@@ -1,0 +1,8 @@
+/* app/exec/exec.module.css */
+.hero {
+  border-radius: 1rem;
+  background: rgba(255,255,255,.8);
+  backdrop-filter: blur(6px);
+  border: 1px solid #e5e7eb; /* gray-200 */
+  padding: 2rem;
+}
