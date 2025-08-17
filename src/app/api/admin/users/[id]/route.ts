@@ -1,4 +1,8 @@
 // app/api/admin/users/[id]/route.ts
+
+export const runtime = "nodejs";
+
+
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 // ※ パスはあなたのプロジェクトに合わせて調整してください
