@@ -191,6 +191,7 @@ model Question {
   config  Json?
   choices Choice[]
   answers Answer[]
+  helpText  String?
 
   @@unique([pollId, index])
   @@index([pollId, index])
