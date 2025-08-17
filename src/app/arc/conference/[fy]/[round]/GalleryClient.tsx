@@ -1,13 +1,14 @@
+// src/app/arc/conference/[fy]/[round]/GalleryClient.tsx
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { AnimatePresence, motion } from "framer-motion";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 export default function GalleryClient({
   images = [],
-  autoplayMs = 5000, // 自動切替（ミリ秒）。0 or 負ならオート再生なし
+  autoplayMs = 5000,
   className = "",
 }: {
   images: string[];
@@ -18,24 +19,42 @@ export default function GalleryClient({
   const [paused, setPaused] = useState(false);
   const touchStartX = useRef<number | null>(null);
 
-  if (!Array.isArray(images) || images.length === 0) return null;
+  const hasImages = Array.isArray(images) && images.length > 0;
 
-  const go = (n: number) => setIdx((p) => (p + n + images.length) % images.length);
-  const to = (n: number) => setIdx(((n % images.length) + images.length) % images.length);
+  // 関数は useCallback で安定化
+  const go = useCallback(
+    (n: number) => {
+      if (!hasImages) return;
+      setIdx((p) => (p + n + images.length) % images.length);
+    },
+    [hasImages, images.length]
+  );
 
-  // オート再生
+  const to = useCallback(
+    (n: number) => {
+      if (!hasImages) return;
+      const mod = ((n % images.length) + images.length) % images.length;
+      setIdx(mod);
+    },
+    [hasImages, images.length]
+  );
+
+  // オート再生（必ずHooksは呼ぶ。中で条件分岐）
   useEffect(() => {
-    if (autoplayMs > 0 && images.length > 1 && !paused) {
-      const t = setInterval(() => go(1), autoplayMs);
-      return () => clearInterval(t);
-    }
-  }, [autoplayMs, images.length, paused]);
+    if (!hasImages) return;
+    if (!(autoplayMs > 0) || images.length <= 1 || paused) return;
+    const t = setInterval(() => go(1), autoplayMs);
+    return () => clearInterval(t);
+  }, [hasImages, autoplayMs, images.length, paused, go]);
 
   // キーボード操作
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "ArrowLeft") go(-1);
     if (e.key === "ArrowRight") go(1);
   };
+
+  // ここで分岐（早期returnはOK：すでにHooksは全て呼んでいる）
+  if (!hasImages) return null;
 
   return (
     <div
@@ -50,14 +69,13 @@ export default function GalleryClient({
         const end = e.changedTouches[0].clientX;
         if (start !== null) {
           const dx = end - start;
-          if (Math.abs(dx) > 40) go(dx < 0 ? 1 : -1); // スワイプ
+          if (Math.abs(dx) > 40) go(dx < 0 ? 1 : -1);
         }
         touchStartX.current = null;
       }}
       aria-roledescription="carousel"
       aria-label="写真ギャラリー"
     >
-      {/* スライド */}
       <AnimatePresence initial={false} mode="wait">
         <motion.div
           key={idx}
@@ -78,7 +96,6 @@ export default function GalleryClient({
         </motion.div>
       </AnimatePresence>
 
-      {/* 左右矢印（浮き上がり・シャドウ） */}
       {images.length > 1 && (
         <>
           <button
@@ -104,7 +121,6 @@ export default function GalleryClient({
         </>
       )}
 
-      {/* ドットインジケータ */}
       {images.length > 1 && (
         <div className="absolute bottom-3 left-0 right-0 flex items-center justify-center gap-2">
           {images.map((_, i) => (
