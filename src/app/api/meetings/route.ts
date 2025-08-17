@@ -1,7 +1,7 @@
 // app/api/participants/[id]/route.ts
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { prisma } from "../../../../lib/prisma"; 
+import { prisma } from "../../../../lib/prisma";
 import { COOKIE_NAME, verifyToken } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -23,11 +23,14 @@ const REGIONS = [
 ] as const;
 type Region = typeof REGIONS[number];
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(
+  req: Request,
+  ctx: { params: Promise<{ id: string }> }     // ← Promise で受ける
+) {
   const session = await requireSession();
   if (session instanceof NextResponse) return session;
 
-  const id = params.id;
+  const { id } = await ctx.params;              // ← await して取り出す
   if (!id) return new NextResponse("Bad Request", { status: 400 });
 
   const body = await req.json().catch(() => ({} as any));
@@ -54,6 +57,8 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     if (!REGIONS.includes(body.district as Region)) {
       return new NextResponse("Invalid district", { status: 400 });
     }
+    // ここではそのまま文字列で保存
+    // ※ Prisma のスキーマが enum の場合は enum へのマッピングが必要です
     data.district = body.district;
   }
 

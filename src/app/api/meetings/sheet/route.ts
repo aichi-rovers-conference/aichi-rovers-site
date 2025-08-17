@@ -5,10 +5,11 @@ import { prisma } from "../../../../../lib/prisma";
 import { COOKIE_NAME, verifyToken } from "@/lib/auth";
 import { District as DistrictEnum } from "@prisma/client";
 
+export const runtime = "nodejs";          // ← Prisma を使うので Node 実行に固定
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-// UI 側と一致させるための地区リスト（日本語ラベル）
+// UI と一致させる地区ラベル
 const REGIONS = [
   "名古屋千種地区","名古屋西部地区","名古屋北斗地区","名古屋巽地区",
   "尾張西地区","尾張東地区","尾張南地区",
@@ -17,7 +18,6 @@ const REGIONS = [
 ] as const;
 type Region = typeof REGIONS[number];
 
-// Prisma の Enum（英字キー）→ 日本語ラベルへの確実なマッピング
 const DISTRICT_LABEL_MAP: Record<DistrictEnum, Region> = {
   [DistrictEnum.NAGOYA_CHIKUSA]: "名古屋千種地区",
   [DistrictEnum.NAGOYA_SEIBU]:   "名古屋西部地区",
@@ -40,13 +40,11 @@ async function requireSession() {
   const jar = await cookies();
   const token = jar.get(COOKIE_NAME)?.value ?? "";
   const session = token ? await verifyToken(token) : null;
-  if (!session) {
-    return NextResponse.json({ ok: false }, { status: 401 });
-  }
+  if (!session) return NextResponse.json({ ok: false }, { status: 401 });
   return session;
 }
 
-function nextMeetingLabel(prev: string | undefined): { code: string; reiwa: number; seq: number } {
+function nextMeetingLabel(prev?: string): { code: string; reiwa: number; seq: number } {
   if (!prev) return { code: "R5-1", reiwa: 5, seq: 1 };
   const m = /^R(\d+)-(\d+)$/.exec(prev);
   if (!m) return { code: "R5-1", reiwa: 5, seq: 1 };
@@ -56,25 +54,22 @@ function nextMeetingLabel(prev: string | undefined): { code: string; reiwa: numb
   return { code: `R${next.reiwa}-${next.seq}`, ...next };
 }
 
-// GET: meetings + participants + attendance を合成して返す
+// GET: meetings + participants + attendance を合成
 export async function GET() {
   const session = await requireSession();
   if (session instanceof NextResponse) return session;
 
-  // 会議一覧（昇順で表示したい前提）
   const meetings = await prisma.meeting.findMany({
     orderBy: [{ reiwa: "asc" }, { seq: "asc" }],
     select: { id: true, code: true },
   });
   const meetingCodes = meetings.map((m) => m.code);
 
-  // 参加者（district は英字 Enum で返ってくる点に注意）
   const participants = await prisma.participant.findMany({
     orderBy: [{ district: "asc" }, { name: "asc" }],
     select: { id: true, name: true, troop: true, rsAge: true, district: true },
   });
 
-  // 出欠（存在しないときも安全に処理）
   const attendance = meetings.length
     ? await prisma.attendance.findMany({
         where: { meetingId: { in: meetings.map((m) => m.id) } },
@@ -84,13 +79,18 @@ export async function GET() {
 
   const presentSet = new Set(attendance.map((a) => `${a.meetingId}:${a.participantId}`));
 
-  // peopleByRegion の初期化
-  const peopleByRegion: Record<Region, any[]> = REGIONS.reduce((acc, r) => {
+  const peopleByRegion: Record<Region, Array<{
+    id: string;
+    name: string;
+    rsAge: string;
+    region: Region;
+    troop: string;
+    attendance: Record<string, boolean>;
+  }>> = REGIONS.reduce((acc, r) => {
     acc[r] = [];
     return acc;
-  }, {} as Record<Region, any[]>);
+  }, {} as any);
 
-  // 地区ごとに参加者を振り分け & 出欠マトリクス生成
   for (const p of participants) {
     const region: Region = DISTRICT_LABEL_MAP[p.district] ?? "その他地区";
     const att: Record<string, boolean> = {};
@@ -107,32 +107,25 @@ export async function GET() {
     });
   }
 
-  return NextResponse.json({
-    meetings: meetingCodes,
-    peopleByRegion,
-  });
+  return NextResponse.json(
+    { meetings: meetingCodes, peopleByRegion },
+    { headers: { "Cache-Control": "no-store, must-revalidate" } }
+  );
 }
 
-// POST: 「定例会列を追加」→ 次の Meeting を作成して meetings を返す
-export async function POST(_req: Request) {
+// POST: 次の定例会列を追加
+export async function POST() {
   const session = await requireSession();
   if (session instanceof NextResponse) return session;
 
-  // 末尾コードから次を決定
   const last = await prisma.meeting.findFirst({
     orderBy: [{ reiwa: "desc" }, { seq: "desc" }],
-    select: { code: true, reiwa: true, seq: true },
+    select: { code: true },
   });
   const { code, reiwa, seq } = nextMeetingLabel(last?.code);
 
   await prisma.meeting.create({
-    data: {
-      code,
-      title: `定例会 ${code}`,
-      date: new Date(),
-      reiwa,
-      seq,
-    },
+    data: { code, title: `定例会 ${code}`, date: new Date(), reiwa, seq },
   });
 
   const all = await prisma.meeting.findMany({
@@ -140,5 +133,8 @@ export async function POST(_req: Request) {
     select: { code: true },
   });
 
-  return NextResponse.json({ ok: true, created: code, meetings: all.map((a) => a.code) });
+  return NextResponse.json(
+    { ok: true, created: code, meetings: all.map((a) => a.code) },
+    { headers: { "Cache-Control": "no-store, must-revalidate" } }
+  );
 }

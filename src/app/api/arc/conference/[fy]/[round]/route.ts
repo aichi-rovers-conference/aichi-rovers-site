@@ -1,9 +1,13 @@
+// app/api/arc/conference/[fy]/[round]/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../../../../../../lib/prisma";
+import { Prisma } from "@prisma/client";
 
+export const runtime = "nodejs"; // Prisma を Node 実行で安定させる
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-export const runtime = "nodejs"; // Prisma を Node 実行で安定させる
+
+const asJson = (v: unknown): Prisma.InputJsonValue => v as Prisma.InputJsonValue;
 
 /* 受け取った fy/round を正規化 */
 function canonFy(input: string) {
@@ -15,7 +19,7 @@ function canonRound(input: string) {
   return Number.isFinite(n) ? String(n) : String(input).trim();
 }
 
-/* 型 */
+/* 型（DB 側は JSON 列を想定）*/
 type SectionText = { id: string; type: "text"; title?: string; body?: string };
 type SectionTimelineItem = { id: string; date?: string; title: string; description?: string };
 type SectionTimeline = { id: string; type: "timeline"; title?: string; items: SectionTimelineItem[] };
@@ -36,7 +40,6 @@ type Payload = {
 
 /** Next.js 15: params は Promise なので await する */
 type ParamsP = Promise<{ fy: string; round: string }>;
-
 const getParams = async (paramsP: ParamsP) => {
   const { fy, round } = await paramsP;
   return { fy: canonFy(fy), round: canonRound(round) };
@@ -51,8 +54,11 @@ export async function GET(_req: NextRequest, { params }: { params: ParamsP }) {
     if (!data) {
       return NextResponse.json({ ok: false, message: "Not found" }, { status: 404 });
     }
-    return NextResponse.json({ ok: true, data });
-  } catch (err) {
+    return NextResponse.json(
+      { ok: true, data },
+      { headers: { "Cache-Control": "no-store, must-revalidate" } }
+    );
+  } catch {
     return NextResponse.json({ ok: false, message: "Internal Server Error" }, { status: 500 });
   }
 }
@@ -60,7 +66,7 @@ export async function GET(_req: NextRequest, { params }: { params: ParamsP }) {
 export async function PUT(req: NextRequest, { params }: { params: ParamsP }) {
   try {
     const fromParams = await getParams(params);
-    const body = (await req.json()) as Partial<Payload>;
+    const body = (await req.json().catch(() => ({}))) as Partial<Payload>;
 
     const fy = canonFy(body.fy ?? fromParams.fy);
     const round = canonRound(body.round ?? fromParams.round);
@@ -68,7 +74,7 @@ export async function PUT(req: NextRequest, { params }: { params: ParamsP }) {
     if (!fy) return NextResponse.json({ ok: false, message: "fy is required" }, { status: 400 });
     if (!round) return NextResponse.json({ ok: false, message: "round is required" }, { status: 400 });
 
-    const title = (body.title ?? "").toString().trim();
+    const title = String(body.title ?? "").trim();
     if (!title) return NextResponse.json({ ok: false, message: "title is required" }, { status: 400 });
 
     const sections = Array.isArray(body.sections) ? body.sections : [];
@@ -81,8 +87,8 @@ export async function PUT(req: NextRequest, { params }: { params: ParamsP }) {
         subtitle: body.subtitle ?? null,
         heroUrl: body.heroUrl ?? null,
         intro: body.intro ?? null,
-        sections,
-        gallery,
+        sections: asJson(sections),
+        gallery: asJson(gallery),
         published: Boolean(body.published),
       },
       create: {
@@ -92,14 +98,17 @@ export async function PUT(req: NextRequest, { params }: { params: ParamsP }) {
         subtitle: body.subtitle ?? null,
         heroUrl: body.heroUrl ?? null,
         intro: body.intro ?? null,
-        sections,
-        gallery,
+        sections: asJson(sections),
+        gallery: asJson(gallery),
         published: Boolean(body.published),
       },
     });
 
-    return NextResponse.json({ ok: true, data: saved });
-  } catch (err) {
+    return NextResponse.json(
+      { ok: true, data: saved },
+      { headers: { "Cache-Control": "no-store, must-revalidate" } }
+    );
+  } catch {
     return NextResponse.json({ ok: false, message: "Internal Server Error" }, { status: 500 });
   }
 }

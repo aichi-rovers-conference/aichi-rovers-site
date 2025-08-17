@@ -1,20 +1,21 @@
 // app/api/polls/[id]/responses/route.ts
 import { NextResponse } from "next/server";
-import { prisma } from "../../../../../../lib/prisma"; 
-
-type QuestionType = "RADIO" | "CHECKBOX" | "TEXT" | "SCALE" | "RATING";
+import { prisma } from "../../../../../../lib/prisma";
+import type { QuestionType } from "@prisma/client";
 
 export const revalidate = 0;
 export const dynamic = "force-dynamic";
 
+type IdParams = { id: string };
+
 export async function GET(
   _req: Request,
-  { params }: { params: Promise<{ id: string }> } 
+  ctx: { params: Promise<IdParams> } // ← Next.js 15: Promise を await
 ) {
-  const { id: pollId } = await params;             
+  const { id: pollId } = await ctx.params;
 
   const poll = await prisma.poll.findUnique({
-    where: { id: pollId },
+    where: { id: pollId as any },
     select: {
       id: true,
       title: true,
@@ -36,58 +37,28 @@ export async function GET(
     },
   });
 
-  if (!poll) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-
-  const uniq = <T, K>(arr: T[], key: (v: T) => K) => {
-    const s = new Set<K>();
-    for (const v of arr) s.add(key(v));
-    return s.size;
-  };
+  if (!poll) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const items: any[] = [];
-  for (const q of poll.questions) {
-    const answers = await prisma.answer.findMany({
-      where: { questionId: q.id },
-      select: {
-        id: true,
-        submissionId: true,
-        choiceId: true,
-        text: true,
-        scaleValue: true,
-        ratingValue: true,
-      },
-      orderBy: { createdAt: "asc" },
-    });
 
-    const respondentCount = uniq(answers, (a) => a.submissionId);
+  for (const q of poll.questions) {
+    // 回答者数（submissionId のユニーク数）
+    const distinctSubs = await prisma.answer.findMany({
+      where: { questionId: q.id },
+      distinct: ["submissionId"],
+      select: { submissionId: true },
+    });
+    const respondentCount = distinctSubs.length;
 
     if (q.type === "RADIO") {
-      const counts: Record<string, number> = {};
-      for (const c of q.choices) counts[c.id] = 0;
-      for (const a of answers) {
-        if (a.choiceId) counts[a.choiceId] = (counts[a.choiceId] ?? 0) + 1;
-      }
-      items.push({
-        questionId: q.id,
-        type: q.type,
-        title: q.title,
-        respondentCount,
-        choices: q.choices.map((c) => ({
-          id: c.id,
-          label: c.label,
-          count: counts[c.id] ?? 0,
-        })),
+      // 選択肢ごとの件数（NULLは除外）
+      const grouped = await prisma.answer.groupBy({
+        by: ["choiceId"],
+        where: { questionId: q.id, NOT: { choiceId: null } },
+        _count: { _all: true },
       });
-    } else if (q.type === "CHECKBOX") {
-      const acs = await prisma.answerChoice.findMany({
-        where: { answer: { questionId: q.id } },
-        select: { choiceId: true },
-      });
-      const counts: Record<string, number> = {};
-      for (const c of q.choices) counts[c.id] = 0;
-      for (const r of acs) counts[r.choiceId] = (counts[r.choiceId] ?? 0) + 1;
+      const counts = new Map<string, number>();
+      grouped.forEach((g) => counts.set(g.choiceId as string, g._count._all));
 
       items.push({
         questionId: q.id,
@@ -97,14 +68,50 @@ export async function GET(
         choices: q.choices.map((c) => ({
           id: c.id,
           label: c.label,
-          count: counts[c.id] ?? 0,
-          percent: respondentCount ? Math.round((counts[c.id] * 100) / respondentCount) : 0,
+          count: counts.get(c.id) ?? 0,
         })),
       });
-    } else if (q.type === "TEXT") {
+      continue;
+    }
+
+    if (q.type === "CHECKBOX") {
+      // 中間テーブルから集計
+      const grouped = await prisma.answerChoice.groupBy({
+        by: ["choiceId"],
+        where: { answer: { questionId: q.id } },
+        _count: { _all: true },
+      });
+      const counts = new Map<string, number>();
+      grouped.forEach((g) => counts.set(g.choiceId, g._count._all));
+
+      items.push({
+        questionId: q.id,
+        type: q.type,
+        title: q.title,
+        respondentCount,
+        choices: q.choices.map((c) => {
+          const count = counts.get(c.id) ?? 0;
+          return {
+            id: c.id,
+            label: c.label,
+            count,
+            percent: respondentCount ? Math.round((count * 100) / respondentCount) : 0,
+          };
+        }),
+      });
+      continue;
+    }
+
+    if (q.type === "TEXT") {
+      const answers = await prisma.answer.findMany({
+        where: { questionId: q.id, NOT: { text: null } },
+        select: { text: true },
+        orderBy: { createdAt: "asc" },
+      });
       const texts = answers
-        .map((a) => a.text)
-        .filter((t): t is string => !!t && t.trim() !== "");
+        .map((a) => (a.text ?? "").trim())
+        .filter((t) => t !== "");
+
       items.push({
         questionId: q.id,
         type: q.type,
@@ -112,15 +119,25 @@ export async function GET(
         respondentCount,
         texts,
       });
-    } else if (q.type === "SCALE") {
+      continue;
+    }
+
+    if (q.type === "SCALE") {
       const min = Number((q.config as any)?.min ?? 1);
       const max = Number((q.config as any)?.max ?? 5);
+
+      const answers = await prisma.answer.findMany({
+        where: { questionId: q.id, NOT: { scaleValue: null } },
+        select: { scaleValue: true },
+      });
+
       const counts: Record<number, number> = {};
       for (let v = min; v <= max; v++) counts[v] = 0;
       for (const a of answers) {
-        const v = a.scaleValue;
+        const v = a.scaleValue as number | null;
         if (typeof v === "number" && v >= min && v <= max) counts[v] += 1;
       }
+
       items.push({
         questionId: q.id,
         type: q.type,
@@ -133,15 +150,25 @@ export async function GET(
           return { value: v, count: counts[v] ?? 0 };
         }),
       });
-    } else if (q.type === "RATING") {
-      const max = Number((q.config as any)?.count ?? (q.config as any)?.max ?? 5);
+      continue;
+    }
+
+    if (q.type === "RATING") {
       const min = 1;
+      const max = Number((q.config as any)?.count ?? (q.config as any)?.max ?? 5);
+
+      const answers = await prisma.answer.findMany({
+        where: { questionId: q.id, NOT: { ratingValue: null } },
+        select: { ratingValue: true },
+      });
+
       const counts: Record<number, number> = {};
       for (let v = min; v <= max; v++) counts[v] = 0;
       for (const a of answers) {
-        const v = a.ratingValue;
+        const v = a.ratingValue as number | null;
         if (typeof v === "number" && v >= min && v <= max) counts[v] += 1;
       }
+
       items.push({
         questionId: q.id,
         type: q.type,
@@ -154,6 +181,7 @@ export async function GET(
           return { value: v, count: counts[v] ?? 0 };
         }),
       });
+      continue;
     }
   }
 

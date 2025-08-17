@@ -1,7 +1,8 @@
 // app/api/polls/[id]/submissions/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "../../../../../../lib/prisma"; 
+import { prisma } from "../../../../../../lib/prisma";
 import type { QuestionType } from "@prisma/client";
+import { randomUUID } from "node:crypto";
 
 export const revalidate = 0;
 export const dynamic = "force-dynamic";
@@ -19,33 +20,47 @@ type AnyIncoming = {
   label?: string;
 };
 
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null;
+
+function pickIncoming(raw: unknown): AnyIncoming[] | undefined {
+  if (Array.isArray(raw)) return raw as AnyIncoming[];
+  if (isRecord(raw) && Array.isArray(raw.answers)) return raw.answers as AnyIncoming[];
+  if (isRecord(raw) && isRecord(raw.data) && Array.isArray(raw.data.answers)) {
+    return raw.data.answers as AnyIncoming[];
+  }
+  return undefined;
+}
+
 export async function POST(
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }   // ← Promise を受け取る
+  ctx: { params: Promise<{ id: string }> } // params は Promise
 ) {
   try {
-    const { id: pollId } = await params;            // ← 必ず await して展開
+    const { id: pollId } = await ctx.params;
 
-    // 受け取り（ゆるく正規化）
-    const raw = await req.json().catch(() => undefined);
-
-    let incoming: AnyIncoming[] | undefined;
-    if (Array.isArray(raw)) incoming = raw as AnyIncoming[];
-    else if (Array.isArray(raw?.answers)) incoming = raw.answers as AnyIncoming[];
-    else if (Array.isArray(raw?.data?.answers)) incoming = raw.data.answers as AnyIncoming[];
-    else if (Array.isArray(raw?.answers) && Array.isArray(raw?.questions)) incoming = raw.answers as AnyIncoming[];
-
+    // 受け取り（型安全に）
+    let raw: unknown;
+    try {
+      raw = await req.json();
+    } catch {
+      raw = undefined;
+    }
+    const incoming = pickIncoming(raw);
     if (!Array.isArray(incoming)) {
       return NextResponse.json({ error: "answers is required" }, { status: 400 });
     }
 
     const poll = await prisma.poll.findUnique({
-      where: { id: pollId },
+      where: { id: pollId as any },
       select: {
         id: true,
         questions: {
           select: {
-            id: true, type: true, required: true, config: true,
+            id: true,
+            type: true,
+            required: true,
+            config: true,
             choices: { select: { id: true, label: true }, orderBy: { index: "asc" } },
           },
           orderBy: { index: "asc" },
@@ -64,7 +79,7 @@ export async function POST(
         if (q.type === "RADIO") {
           let cid = a.choiceId;
           if (!cid && (a.value || a.label)) {
-            const key = (a.value ?? a.label ?? "").trim();
+            const key = String(a.value ?? a.label ?? "").trim();
             const hit = q.choices.find((c) => c.id === key || c.label === key);
             if (hit) cid = hit.id;
           }
@@ -72,12 +87,16 @@ export async function POST(
         }
 
         if (q.type === "CHECKBOX") {
+          // id/label いずれでも解決可、重複は除去
           let cids = Array.isArray(a.choiceIds) ? a.choiceIds.slice() : undefined;
           if (!cids && Array.isArray(a.values)) {
             const want = new Set(a.values.map((v) => String(v)));
-            cids = q.choices.filter(c => want.has(c.id) || want.has(c.label)).map(c => c.id);
+            cids = q.choices
+              .filter((c) => want.has(c.id) || want.has(c.label))
+              .map((c) => c.id);
           }
-          return { ...a, choiceIds: cids ?? [] };
+          cids = Array.from(new Set(cids ?? []));
+          return { ...a, choiceIds: cids };
         }
 
         if (q.type === "TEXT") {
@@ -89,7 +108,9 @@ export async function POST(
           const min = Number((q.config as any)?.min ?? 1);
           const max = Number((q.config as any)?.max ?? 5);
           const num = Number(a.scaleValue);
-          if (Number.isFinite(num) && num >= min && num <= max) return { ...a, scaleValue: num };
+          if (Number.isFinite(num) && num >= min && num <= max) {
+            return { ...a, scaleValue: num };
+          }
           return null;
         }
 
@@ -97,7 +118,9 @@ export async function POST(
         const min = 1;
         const max = Number((q.config as any)?.count ?? (q.config as any)?.max ?? 5);
         const num = Number(a.ratingValue);
-        if (Number.isFinite(num) && num >= min && num <= max) return { ...a, ratingValue: num };
+        if (Number.isFinite(num) && num >= min && num <= max) {
+          return { ...a, ratingValue: num };
+        }
         return null;
       })
       .filter(Boolean) as AnyIncoming[];
@@ -106,28 +129,46 @@ export async function POST(
       return NextResponse.json({ error: "no valid answers" }, { status: 400 });
     }
 
+    const fingerprint =
+      isRecord(raw) && typeof raw.fingerprint === "string" && raw.fingerprint.trim() !== ""
+        ? raw.fingerprint
+        : randomUUID();
+
     const created = await prisma.submission.create({
       data: {
         pollId,
-        fingerprint: raw?.fingerprint ?? crypto.randomUUID(),
+        fingerprint,
         answers: {
           create: normalized.map((a) => {
             switch (a.type) {
               case "RADIO":
-                return { questionId: a.questionId, choiceId: a.choiceId ?? null };
+                return {
+                  question: { connect: { id: a.questionId } },
+                  choiceId: a.choiceId ?? null,
+                };
               case "CHECKBOX":
                 return {
-                  questionId: a.questionId,
-                  choices: (a.choiceIds?.length ?? 0) > 0
-                    ? { create: a.choiceIds!.map((cid) => ({ choiceId: cid })) }
-                    : undefined,
+                  question: { connect: { id: a.questionId } },
+                  choices:
+                    (a.choiceIds?.length ?? 0) > 0
+                      ? { create: a.choiceIds!.map((cid) => ({ choiceId: cid })) }
+                      : undefined,
                 };
               case "TEXT":
-                return { questionId: a.questionId, text: a.text ?? null };
+                return {
+                  question: { connect: { id: a.questionId } },
+                  text: a.text ?? null,
+                };
               case "SCALE":
-                return { questionId: a.questionId, scaleValue: a.scaleValue as number };
+                return {
+                  question: { connect: { id: a.questionId } },
+                  scaleValue: a.scaleValue as number,
+                };
               case "RATING":
-                return { questionId: a.questionId, ratingValue: a.ratingValue as number };
+                return {
+                  question: { connect: { id: a.questionId } },
+                  ratingValue: a.ratingValue as number,
+                };
             }
           }),
         },
@@ -141,6 +182,7 @@ export async function POST(
     );
   } catch (e: any) {
     if (e?.code === "P2002") {
+      // 例: (pollId, fingerprint) のユニーク制約違反
       return NextResponse.json({ error: "Duplicate submission" }, { status: 409 });
     }
     console.error(e);
@@ -150,8 +192,8 @@ export async function POST(
 
 export async function GET(
   _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  ctx: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
+  const { id } = await ctx.params;
   return NextResponse.json({ ok: true, id, where: "/api/polls/[id]/submissions" });
 }

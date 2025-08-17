@@ -1,13 +1,14 @@
 // app/api/participants/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "../../../../lib/prisma";
-import { District as DistrictEnum } from "@prisma/client";
-import { rebuildMeetingSheet } from "@/lib/buildMeetingSheet"; // ★ 追加
+import { District as DistrictEnum, Prisma } from "@prisma/client";
+import { rebuildMeetingSheet } from "@/lib/buildMeetingSheet";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+export const runtime = "nodejs";
 
-// 日本語ラベル <-> Enum の双方向マップ
+// 日本語ラベル <-> Enum
 const LABEL_BY_ENUM: Record<DistrictEnum, string> = {
   [DistrictEnum.NAGOYA_CHIKUSA]: "名古屋千種地区",
   [DistrictEnum.NAGOYA_SEIBU]:   "名古屋西部地区",
@@ -30,12 +31,9 @@ const ENUM_BY_LABEL: Record<string, DistrictEnum> =
 
 function parseDistrictParam(input?: string | null): DistrictEnum | undefined {
   if (!input) return undefined;
-  // Enum値（英大文字+_）で来た場合
-  if ((Object.keys(LABEL_BY_ENUM) as string[]).includes(input)) {
-    return input as DistrictEnum;
-  }
-  // 日本語ラベルで来た場合
-  if (ENUM_BY_LABEL[input]) return ENUM_BY_LABEL[input];
+  const s = String(input).trim();
+  if ((Object.keys(LABEL_BY_ENUM) as string[]).includes(s)) return s as DistrictEnum; // Enum記号
+  if (ENUM_BY_LABEL[s]) return ENUM_BY_LABEL[s]; // 日本語ラベル
   return undefined;
 }
 
@@ -45,7 +43,6 @@ function toDTO(p: any) {
     name: p.name,
     troop: p.troop,
     rsAge: p.rsAge,
-    // クライアントは日本語で扱いやすいので district は日本語で返却
     district: LABEL_BY_ENUM[p.district as DistrictEnum],
     email: p.email ?? null,
     createdAt: p.createdAt,
@@ -59,20 +56,36 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const districtParam = searchParams.get("district");
     const q = (searchParams.get("q") || "").trim();
-    const limit = Math.min(200, Number(searchParams.get("limit") || 50));
+    const limitRaw = Number(searchParams.get("limit") || 50);
+    const limit = Number.isFinite(limitRaw) ? Math.min(200, Math.max(1, limitRaw)) : 50;
     const hasEmail = (searchParams.get("hasEmail") || "").toLowerCase() === "true";
 
-    const where: any = {};
+    const where: Prisma.ParticipantWhereInput = {};
+    const andParts: Prisma.ParticipantWhereInput[] = [];
+
     const districtEnum = parseDistrictParam(districtParam);
     if (districtEnum) where.district = districtEnum;
+
     if (q) {
+      // ※ あなたの Prisma 型では email/name/troop の filter に mode が無いようなので、純粋な contains のみ
       where.OR = [
-        { name: { contains: q } },
+        { name:  { contains: q } },
         { troop: { contains: q } },
         { email: { contains: q } },
       ];
     }
-    if (hasEmail) where.email = { not: null };
+
+    if (hasEmail) {
+      andParts.push({ email: { not: null } });
+      andParts.push({ NOT: { email: "" } });
+    }
+
+    if (andParts.length) {
+      const existing = where.AND;
+      if (Array.isArray(existing)) where.AND = [...existing, ...andParts];
+      else if (existing) where.AND = [existing, ...andParts];
+      else where.AND = andParts;
+    }
 
     const items = await prisma.participant.findMany({
       where,
@@ -102,7 +115,6 @@ export async function POST(req: Request) {
     if (!name || !troop || !Number.isFinite(rsAge) || !districtEnum) {
       return NextResponse.json({ error: "invalid payload" }, { status: 400 });
     }
-    // email は任意。与えられたら最低限の形式チェックだけ緩く行う
     if (emailRaw && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailRaw)) {
       return NextResponse.json({ error: "invalid email" }, { status: 400 });
     }
@@ -111,17 +123,14 @@ export async function POST(req: Request) {
       data: { name, troop, rsAge, district: districtEnum, email: emailRaw },
     });
 
-    // ★ 参加者登録後にシート再生成（即時反映）
     try {
       await rebuildMeetingSheet();
     } catch (rebuildErr) {
       console.error("rebuildMeetingSheet failed:", rebuildErr);
-      // 再生成失敗は致命ではないので 201 は維持
     }
 
     return NextResponse.json({ ok: true, item: toDTO(p) }, { status: 201 });
   } catch (e: any) {
-    // email の unique 制約違反など
     if (e?.code === "P2002") {
       return NextResponse.json(
         { ok: false, error: "DUPLICATE", message: "email is already registered" },

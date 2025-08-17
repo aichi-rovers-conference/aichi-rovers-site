@@ -48,7 +48,6 @@ export async function POST(req: Request) {
     // remember: true => 30日 / false => 8時間
     const token = await signSession(payload, remember ? "30d" : "8h");
 
-    const isProd = process.env.NODE_ENV === "production";
     const res = NextResponse.json({
       ok: true,
       user: {
@@ -61,15 +60,20 @@ export async function POST(req: Request) {
       remember,
     });
 
-    res.cookies.set(COOKIE_NAME, token, {
+    // 本番は常に secure、sameSite=Lax、path=/。必要に応じて domain を設定
+    const isProd = process.env.NODE_ENV === "production";
+    const cookieOpts: Parameters<typeof res.cookies.set>[2] = {
       httpOnly: true,
       secure: isProd,
       sameSite: "lax",
       path: "/",
       maxAge: remember ? 60 * 60 * 24 * 30 : 60 * 60 * 8,
-    });
+      // domain: ".example.com", // ルート/サブドメイン共有が必要なら指定
+    };
 
-    // レガシー Cookie を掃除（存在していれば削除）
+    res.cookies.set(COOKIE_NAME, token, cookieOpts);
+
+    // レガシーCookie掃除（存在していれば削除）
     for (const legacy of ["admin", "admin_id", "admin_role", "session"]) {
       res.cookies.set(legacy, "", { path: "/", maxAge: 0 });
     }
