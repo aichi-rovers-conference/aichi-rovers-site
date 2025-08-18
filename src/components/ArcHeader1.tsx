@@ -26,9 +26,9 @@ export default function ArcHeader1({
 
   return (
     <>
-      {/* PC: 既存デザイン（md以上で表示） */}
+      {/* PC: xl以上で表示（md～lg は常にハンバーガー） */}
       <header
-        className={`hidden md:flex select-none w-full items-center justify-between p-4 bg-white shadow z-50 relative ${className}`}
+        className={`hidden xl:flex select-none w-full items-center justify-between p-4 bg-white shadow z-50 relative ${className}`}
       >
         <div className="flex items-center">
           <Link href="/" className="flex items-center">
@@ -44,7 +44,7 @@ export default function ArcHeader1({
           </Link>
         </div>
 
-        <nav className="flex space-x-6 text-gray-600">
+        <nav className="flex flex-nowrap whitespace-nowrap gap-4 text-gray-600">
           {navItems.map((item) => {
             const isActive = pathname === item.path;
             return (
@@ -62,21 +62,24 @@ export default function ArcHeader1({
         </nav>
       </header>
 
-      {/* Mobile: タイトル1行省略＋ドロワー */}
-      <header className={`md:hidden sticky top-0 z-50 bg-white shadow ${className}`}>
+      {/* Mobile/Tablet: xl未満は常にハンバーガー */}
+      <header className={`xl:hidden sticky top-0 z-50 bg-white shadow ${className}`}>
         <div
-          className="grid w-full grid-cols-3 items-center h-14"
+          className="grid w-full items-center h-14"
           style={{
+            // 左右の安全領域 + 16pxパディングを確保
             paddingTop: "env(safe-area-inset-top)",
             paddingLeft: "calc(env(safe-area-inset-left) + 16px)",
             paddingRight: "calc(env(safe-area-inset-right) + 16px)",
+            // 左 44px（ボタン） / 中央 1fr / 右 44px（スペーサ）
+            gridTemplateColumns: "44px 1fr 44px",
           }}
         >
           {/* 左：ハンバーガー */}
           <div className="flex items-center">
             <motion.button
               onClick={() => setIsOpen((v) => !v)}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-md"
+              className="inline-flex h-11 w-11 -ml-1 items-center justify-center rounded-md"
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.96 }}
               aria-label={isOpen ? "メニューを閉じる" : "メニューを開く"}
@@ -92,7 +95,7 @@ export default function ArcHeader1({
                     exit={{ rotate: 90, opacity: 0 }}
                     transition={{ type: "spring", stiffness: 400, damping: 28 }}
                   >
-                    <X size={26} className="text-black" />
+                    <X size={22} className="text-black" />
                   </motion.span>
                 ) : (
                   <motion.span
@@ -102,30 +105,40 @@ export default function ArcHeader1({
                     exit={{ rotate: -90, opacity: 0 }}
                     transition={{ type: "spring", stiffness: 400, damping: 28 }}
                   >
-                    <Menu size={26} className="text-black" />
+                    <Menu size={22} className="text-black" />
                   </motion.span>
                 )}
               </AnimatePresence>
             </motion.button>
           </div>
 
-          {/* 中央：ロゴ＋サイト名（必ず1行で省略） */}
-          <div className="justify-self-center">
-            <Link href="/" className="flex items-center gap-2 leading-none" onClick={() => setIsOpen(false)}>
+          {/* 中央：ロゴ＋サイト名（可変フォント＋実幅ベースで最大化） */}
+          <div className="justify-self-center min-w-0">
+            <Link
+              href="/"
+              className="flex items-center gap-1.5 leading-none min-w-0"
+              onClick={() => setIsOpen(false)}
+            >
               <Image
                 src={logoSrc}
                 alt="ARC Logo"
-                width={28}
-                height={28}
-                className="h-7 w-7 object-contain select-none"
+                width={24}
+                height={24}
+                className="h-6 w-6 object-contain select-none flex-shrink-0"
                 draggable={false}
               />
               <span
                 className="
-                  text-[14px] font-bold text-gray-800 select-none
-                  whitespace-nowrap overflow-hidden text-ellipsis
-                  max-w-[58vw]
+                  font-bold text-gray-800 select-none tracking-tight
+                  whitespace-nowrap overflow-hidden text-ellipsis block
                 "
+                // 幅は端末幅から左右の安全領域・パディング・ボタン幅を厳密に差し引く
+                style={{
+                  // iPhone 12 (390px) 前提でも入りやすいようフォントをより小さく可変
+                  fontSize: "clamp(10px, 3.2vw, 15px)",
+                  maxWidth:
+                    "calc(100vw - (env(safe-area-inset-left) + env(safe-area-inset-right) + 112px))",
+                }}
                 title={siteName}
               >
                 {siteName}
@@ -133,7 +146,7 @@ export default function ArcHeader1({
             </Link>
           </div>
 
-          {/* 右：スペーサー */}
+          {/* 右：スペーサー（将来ボタンを置きたい時の受け皿） */}
           <div className="justify-self-end" />
         </div>
 
