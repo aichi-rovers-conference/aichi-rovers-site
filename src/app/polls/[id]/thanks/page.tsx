@@ -1,69 +1,56 @@
-// app/polls/[id]/thanks/page.tsx
+// src/app/polls/[id]/thanks/page.tsx
 import Link from "next/link";
-import type { Metadata } from "next";
-import { cookies } from "next/headers";
-import { verifyToken, COOKIE_NAME } from "@/lib/auth";
+import type { ResolvingMetadata } from "next";
 
-export const metadata: Metadata = {
-  title: "ご回答ありがとうございました",
-  description: "アンケート送信完了ページ",
+// ✅ Next.js 15 では params は Promise を想定
+type Props = {
+  params: Promise<{ id: string }>;
 };
 
-export default async function ThanksPage({ params }: { params: { id: string } }) {
-  const { id } = params;
-
-  // セッション確認（ADMIN のみ運営ダッシュボードへ）
-  const cookieStore = await cookies();
-  const token = cookieStore.get(COOKIE_NAME)?.value || "";
-  const session = token ? await verifyToken(token) : null;
-  const backHref = session && String((session as any).role) === "ADMIN" ? "/exec/polls" : "/polls";
+export default async function ThanksPage({ params }: Props) {
+  const { id } = await params;
 
   return (
-    <main className="min-h-screen bg-slate-50">
-      {/* ヘッダー（Googleフォーム風） */}
-      <div className="h-44 w-full bg-gradient-to-r from-purple-600 to-indigo-600" />
+    <main className="mx-auto max-w-3xl p-6">
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <h1 className="text-xl font-bold tracking-tight md:text-2xl">ご回答ありがとうございました</h1>
+        <p className="mt-2 text-sm text-slate-600">
+          アンケート（ID: <span className="font-mono">{id}</span>）へのご協力に感謝します。
+        </p>
 
-      {/* カード（ヘッダーに重ねる） */}
-      <div className="-mt-16 px-4 pb-24">
-        <div className="mx-auto max-w-2xl rounded-xl border border-slate-200 bg-white shadow-md">
-          {/* タイトル行：左アクセントバー */}
-          <header className="flex items-start gap-3 p-6">
-            <div className="mt-1 h-6 w-1.5 rounded bg-purple-600" />
-            <div className="flex-1">
-              <h1 className="text-2xl font-semibold text-slate-800">送信を受け付けました</h1>
-              <p className="mt-1 text-sm text-slate-500">
-                アンケートID <span className="font-mono text-slate-700">{id}</span> の回答が正常に送信されました。
-              </p>
-            </div>
-          </header>
-
-          <div className="h-px w-full bg-slate-100" />
-
-          {/* 本文 */}
-          <section className="p-6">
-            <div className="mx-auto grid place-items-center gap-3 text-center">
-              <div className="grid h-16 w-16 place-items-center rounded-full bg-purple-50">
-                <span className="text-3xl">🎉</span>
-              </div>
-              <p className="text-slate-600">
-                ご協力ありがとうございました。ブラウザを閉じても構いません。
-              </p>
-            </div>
-          </section>
+        <div className="mt-6 flex flex-wrap gap-3">
+          <Link
+            href={`/polls/${encodeURIComponent(id)}`}
+            className="inline-flex items-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+          >
+            回答内容に戻る
+          </Link>
+          <Link
+            href="/polls"
+            className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            アンケート一覧へ
+          </Link>
+          <Link
+            href="/"
+            className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            ARCホームへ
+          </Link>
         </div>
-      </div>
-
-      {/* 下側中央のリンク（Filled ボタン） */}
-      <div className="pointer-events-none fixed inset-x-0 bottom-6 flex justify-center">
-        <Link
-          href={backHref}
-          prefetch
-          className="pointer-events-auto inline-flex items-center gap-2 rounded-full bg-purple-600 px-6 py-2 text-sm font-semibold text-white shadow-md transition hover:bg-purple-700"
-          aria-label="アンケート一覧へ戻る"
-        >
-          アンケート一覧へ
-        </Link>
       </div>
     </main>
   );
+}
+
+// ✅ メタデータも Promise params を待ってから生成
+export async function generateMetadata(
+  { params }: Props,
+  _parent: ResolvingMetadata
+) {
+  const { id } = await params;
+  return {
+    title: `回答完了 | アンケート ${id}`,
+    description: `アンケート（ID: ${id}）の回答が完了しました。`,
+  };
 }
