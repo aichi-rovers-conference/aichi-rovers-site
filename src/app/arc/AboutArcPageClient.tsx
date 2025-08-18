@@ -1,11 +1,10 @@
+// app/arc/page.tsx など、このページファイルまるごと置き換え
 "use client";
 
 import { useState, useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { usePathname } from "next/navigation";
-import { motion, useScroll, useTransform, AnimatePresence } from "framer-motion";
-import { Menu, X } from "lucide-react";
+import { motion, useScroll, useTransform } from "framer-motion";
 import { FaFacebook, FaInstagram, FaXTwitter, FaLine } from "react-icons/fa6";
 import ArcHeader1 from "@/components/ArcHeader1";
 
@@ -22,10 +21,15 @@ function TextRightImage({
   imgAlt: string;
 }) {
   return (
-    <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-8 items-center py-12">
+    <div className="mx-auto max-w-6xl grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-10 items-center py-10 sm:py-12">
       <div>
-        <h2 className="text-red-600 text-3xl md:text-4xl font-bold mb-5">{title}</h2>
-        <div className="arc-body space-y-4">
+        <h2
+          className="text-red-600 font-bold mb-4 sm:mb-5 leading-tight"
+          style={{ fontSize: "clamp(22px, 4.8vw, 36px)" }} // 22〜36px 可変
+        >
+          {title}
+        </h2>
+        <div className="space-y-4 text-[15px] sm:text-base md:text-[19px] leading-relaxed text-black/90">
           {children}
         </div>
       </div>
@@ -35,7 +39,8 @@ function TextRightImage({
           alt={imgAlt}
           width={520}
           height={380}
-          className="rounded-lg shadow-lg object-cover select-none"
+          sizes="(max-width: 768px) 86vw, 520px"
+          className="w-full max-w-[520px] h-auto rounded-lg shadow-lg object-cover select-none"
           draggable={false}
         />
       </div>
@@ -44,19 +49,7 @@ function TextRightImage({
 }
 
 export default function AboutArcPage() {
-  const [isOpen, setIsOpen] = useState(false);
-  const pathname = usePathname();
-
-  // ====== ヒーロー（ホームと同じ動き） ======
-  const heroRef = useRef<HTMLDivElement | null>(null);
-  const { scrollYProgress } = useScroll({
-    target: heroRef,
-    offset: ["start start", "end start"],
-  });
-  const yImg = useTransform(scrollYProgress, [0, 1], [0, 320]);
-  const overlayOpacity = useTransform(scrollYProgress, [0, 1], [0.5, 0.6]);
-
-  // ====== ナビ（パスは実URLに） ======
+  const [isOpen] = useState(false); // ドロワー等で使う場合は状態を受け渡し
   const navItems = [
     { name: "ホーム", path: "/" },
     { name: "ARCとは", path: "/arc" },
@@ -64,48 +57,72 @@ export default function AboutArcPage() {
     { name: "ARC定例会", path: "/arc/conference" },
     { name: "ARC運営委員会", path: "/arc/executive-committee" },
     { name: "ARCアンケート", path: "/polls" },
-    { name: "ミニゲーム", path: "/games"},
+    { name: "ミニゲーム", path: "/games" },
   ];
+
+  // ====== ヒーロー（モバイルで動き控えめ） ======
+  const heroRef = useRef<HTMLDivElement | null>(null);
+  const { scrollYProgress } = useScroll({
+    target: heroRef,
+    offset: ["start start", "end start"],
+  });
+  const yImg = useTransform(scrollYProgress, [0, 1], [0, 240]); // 画像の移動量を控えめに
+  const overlayOpacity = useTransform(scrollYProgress, [0, 1], [0.45, 0.6]); // 暗幕
 
   return (
     <div className="w-full bg-white">
-      {/* ヘッダー（最小変更） */}
+      {/* ヘッダー */}
       <ArcHeader1 navItems={navItems} />
 
       {/* ヒーロー：ページ専用タイトル */}
-      <div ref={heroRef} className="select-none relative w-full h-[42vh] overflow-hidden">
+      <div ref={heroRef} className="relative w-full h-[42vh] sm:h-[46vh] overflow-hidden select-none">
         <motion.div style={{ y: yImg }} className="absolute inset-0 will-change-transform">
           <Image
             src="/images/R6-3.JPG"
             alt="Aichi Rovers Conference"
             fill
-            className="object-cover z-0 select-none"
-            draggable={false}
             priority
             sizes="100vw"
+            className="object-cover z-0 select-none"
+            draggable={false}
           />
         </motion.div>
         <motion.div style={{ opacity: overlayOpacity }} className="absolute inset-0 bg-black z-10" />
         <motion.div
-          className="absolute inset-0 z-20 flex flex-col items-center justify-center text-center"
+          className={`absolute inset-0 z-20 flex flex-col items-center justify-center text-center ${
+            isOpen ? "pointer-events-none opacity-0" : "opacity-100"
+          }`}
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.9, ease: "easeOut" }}
         >
-          <h1 className="text-white text-5xl md:text-6xl font-bold drop-shadow-lg">ARCとは</h1>
-          <p className="text-white/90 font-medium text-xl md:text-2xl mt-3">
+          <h1
+            className="text-white font-extrabold drop-shadow-lg leading-tight"
+            style={{ fontSize: "clamp(28px, 7vw, 48px)" }} // 28〜48px 可変
+          >
+            ARCとは
+          </h1>
+          <p
+            className="text-white/90 font-medium mt-2 sm:mt-3"
+            style={{ fontSize: "clamp(14px, 4.6vw, 24px)" }} // 14〜24px 可変
+          >
             Aichi Rovers Conference Overview
           </p>
         </motion.div>
       </div>
 
       {/* 本文 */}
-      <section className="w-full bg-white py-12 px-6 md:px-16">
+      <section className="w-full bg-white py-10 sm:py-12 md:py-16 px-4 sm:px-6 md:px-10 lg:px-16">
         {/* 導入：ARCとは */}
-        <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-8 items-center py-10">
+        <div className="mx-auto max-w-6xl grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-10 items-center py-8 sm:py-10">
           <div>
-            <h2 className="text-red-600 text-3xl md:text-4xl font-bold mb-5">ARCとは</h2>
-            <div className="arc-body space-y-4">
+            <h2
+              className="text-red-600 font-bold mb-4 sm:mb-5 leading-tight"
+              style={{ fontSize: "clamp(22px, 4.8vw, 36px)" }}
+            >
+              ARCとは
+            </h2>
+            <div className="space-y-4 text-[15px] sm:text-base md:text-[19px] leading-relaxed text-black/90">
               <p>
                 愛知ローバース会議（AICHI ROVERS CONFERENCE：通称ARC）は、
                 愛知連盟に所属するRS（18歳から26歳の3月まで）と同年代指導者によって構成されています。
@@ -118,21 +135,25 @@ export default function AboutArcPage() {
               alt="ARCの紹介イメージ"
               width={520}
               height={380}
-              className="rounded-lg shadow-lg object-cover select-none"
+              sizes="(max-width: 768px) 86vw, 520px"
+              className="w-full max-w-[520px] h-auto rounded-lg shadow-lg object-cover select-none"
               draggable={false}
             />
           </div>
         </div>
 
         {/* 見出し：ARCの活動 */}
-        <div className="max-w-6xl mx-auto py-4">
-          <h2 className="text-gray-800 text-2xl md:text-3xl font-extrabold tracking-tight">
+        <div className="mx-auto max-w-6xl py-4">
+          <h2
+            className="text-gray-800 font-extrabold tracking-tight"
+            style={{ fontSize: "clamp(20px, 4.4vw, 30px)" }} // 20〜30px 可変
+          >
             ARCの活動
           </h2>
           <div className="mt-2 h-[2px] w-16 bg-red-600 rounded-full" />
         </div>
 
-        {/* ARC総会・定例会 */}
+        {/* 各セクション */}
         <TextRightImage title="ARC総会・定例会" imgSrc="/images/sample.png" imgAlt="総会・定例会の様子">
           <p>
             愛知ローバース会議では年に1回の年次総会と年に4回の定例会を行っています。平均60名以上が参加し、
@@ -142,7 +163,6 @@ export default function AboutArcPage() {
           <p>また、必要に応じて愛知のローバースカウトの意思決定を行っています。</p>
         </TextRightImage>
 
-        {/* ARC交流会 */}
         <TextRightImage title="ARC交流会" imgSrc="/images/sample.png" imgAlt="交流会の様子">
           <p>
             年に1回、野外での1泊2日の交流会を開催しています。今後一緒に活動する仲間を見つけるため、
@@ -151,7 +171,6 @@ export default function AboutArcPage() {
           </p>
         </TextRightImage>
 
-        {/* ARCローバーオリエンテーション */}
         <TextRightImage
           title="ARCローバーオリエンテーション"
           imgSrc="/images/sample.png"
@@ -161,23 +180,17 @@ export default function AboutArcPage() {
             ベンチャースカウトへローバースカウトの魅力を伝える事業です。「VSとRSの違い」や「ARCの紹介」
             「RSでの活躍機会の紹介」などを伝えるセミナーを行っています。
           </p>
-          <p>
-            また、ベンチャースカウトとローバースカウトの交流会を通じて、両者がつながりを築くことを目的としています。
-          </p>
+          <p>また、ベンチャースカウトとローバースカウトの交流会を通じて、両者がつながりを築くことを目的としています。</p>
         </TextRightImage>
 
-        {/* ARC運営委員セミナー */}
         <TextRightImage title="ARC運営委員セミナー" imgSrc="/images/sample.png" imgAlt="運営委員セミナーの様子">
           <p>
             年度始まりにARC運営委員と他コミュニティ運営委員を対象としたセミナーを開催しています。
             組織を運営していく上で必要な知識と心構えを学び、運営主体としての価値を共有し更なる活躍を目指しています。
           </p>
-          <p>
-            このセミナーは議長をはじめ、先輩委員が準備しセッションを展開しています。
-          </p>
+          <p>このセミナーは議長をはじめ、先輩委員が準備しセッションを展開しています。</p>
         </TextRightImage>
 
-        {/* その他事業の運営 */}
         <TextRightImage title="その他事業の運営" imgSrc="/images/sample.png" imgAlt="各種事業の様子">
           <p>
             県連盟事業や委託事業をARC構成員が実行委員となり、運営しています。
@@ -187,55 +200,57 @@ export default function AboutArcPage() {
       </section>
 
       {/* 仕切り線 */}
-      <div className="max-w-6xl mx-auto mt-8 mb-10 px-6 md:px-16">
+      <div className="mx-auto max-w-6xl mt-10 mb-8 px-4 sm:px-6 md:px-10 lg:px-16">
         <div className="border-t border-gray-300" />
       </div>
 
-      {/* SNSリンク（ホーム踏襲） */}
+      {/* SNSリンク（アイコンはモバイルでは控えめ） */}
       <section className="bg-gray-100 py-6">
-        <div className="max-w-6xl mx-auto flex justify-center gap-8">
+        <div className="mx-auto max-w-6xl flex justify-center gap-6 sm:gap-8">
           <motion.a
             href="https://www.facebook.com/aichirovers/?locale=ja_JP"
             target="_blank"
             rel="noopener noreferrer"
-            whileHover={{ y: -4, scale: 1.06 }}
-            whileTap={{ scale: 0.96 }}
+            whileHover={{ y: -3, scale: 1.05 }}
+            whileTap={{ scale: 0.97 }}
             transition={{ type: "spring", stiffness: 320, damping: 22 }}
-            className="text-blue-500 hover:text-blue-400 transition-colors duration-200"
+            className="text-blue-500 hover:text-blue-400"
+            aria-label="Facebook"
           >
-            <FaFacebook size={28} />
+            <FaFacebook size={26} className="sm:size-[28px]" />
           </motion.a>
-          <span className="text-pink-500 opacity-40 cursor-not-allowed">
-            <FaInstagram size={32} />
+
+          <span className="text-pink-500 opacity-40 cursor-not-allowed" aria-disabled="true" aria-label="Instagram（未開設）">
+            <FaInstagram size={28} className="sm:size-[32px]" />
           </span>
-          <span className="text-black opacity-40 cursor-not-allowed">
-            <FaXTwitter size={32} />
+
+          <span className="text-black opacity-40 cursor-not-allowed" aria-disabled="true" aria-label="X（未開設）">
+            <FaXTwitter size={28} className="sm:size-[32px]" />
           </span>
+
           <motion.a
             href="https://lin.ee/BPXqTTv"
             target="_blank"
             rel="noopener noreferrer"
-            whileHover={{ y: -4, scale: 1.06 }}
-            whileTap={{ scale: 0.96 }}
+            whileHover={{ y: -3, scale: 1.05 }}
+            whileTap={{ scale: 0.97 }}
             transition={{ type: "spring", stiffness: 320, damping: 22 }}
-            className="text-green-600 hover:text-green-500 transition-colors duration-200"
+            className="text-green-600 hover:text-green-500"
+            aria-label="LINE"
           >
-            <FaLine size={32} />
+            <FaLine size={28} className="sm:size-[32px]" />
           </motion.a>
         </div>
       </section>
 
-      {/* フッター（ホーム踏襲） */}
-      <footer className="bg-gray-900 text-white py-6 mt-12">
-        <div className="max-w-6xl mx-auto px-6 md:px-16 text-center">
-          <p className="text-lg font-semibold mb-2">お問い合わせ</p>
-          <a
-            href="mailto:aichi.rovers.conference@gmail.com"
-            className="text-red-400 hover:text-red-300 transition-colors duration-200"
-          >
+      {/* フッター */}
+      <footer className="bg-gray-900 text-white py-8 mt-10">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 md:px-10 lg:px-16 text-center">
+          <p className="text-base sm:text-lg font-semibold mb-2">お問い合わせ</p>
+          <a href="mailto:aichi.rovers.conference@gmail.com" className="text-red-400 hover:text-red-300 transition-colors">
             aichi.rovers.conference@gmail.com
           </a>
-          <p className="mt-4 text-sm text-gray-400">
+          <p className="mt-4 text-xs sm:text-sm text-gray-400">
             &copy; {new Date().getFullYear()} Aichi Rovers Conference. All rights reserved.
           </p>
         </div>
