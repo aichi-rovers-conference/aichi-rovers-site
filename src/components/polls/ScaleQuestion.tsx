@@ -2,8 +2,8 @@
 import React, { useMemo } from "react";
 import type { Question } from "./types";
 
-type Scale = NonNullable<Question["scale"]>;
-type ScaleShape = { min: 0 | 1; max: number; minLabel: string; maxLabel: string };
+/** 内部で扱う正規化後のスケール型（ラベルは必ず string） */
+type Scale = { min: 0 | 1; max: number; minLabel: string; maxLabel: string };
 
 type EditProps = {
   mode?: "edit" | "create";
@@ -22,43 +22,54 @@ type AnswerProps = {
 };
 type Props = EditProps | AnswerProps;
 
-// 数値化ヘルパー（"10"→10 などを許容）
+/* ===================== Util ===================== */
+// 数値化（"10"→10 等を許容）
 const toNum = (x: unknown, fallback: number) => {
   const n = typeof x === "number" ? x : typeof x === "string" ? Number(x) : NaN;
   return Number.isFinite(n) ? n : fallback;
 };
+// 文字列化（undefined を許容せず string を返す）
+const toStr = (v: unknown, fallback = ""): string =>
+  typeof v === "string" ? v : v == null ? fallback : String(v);
 
-function normalizeScale(src?: Partial<Scale>): Scale {
+/** スケールの正規化（min: 0|1, max: 2..10 かつ min+1 以上、ラベルは必ず string） */
+function normalizeScale(src?: Partial<Question["scale"]> | Record<string, unknown>): Scale {
   const rawMin = (src as any)?.min;
-  const min = (rawMin === 0 || rawMin === "0") ? 0 : (1 as 0 | 1);
+  const min: 0 | 1 = rawMin === 0 || rawMin === "0" ? 0 : 1;
 
+  // max は 2..10 に制限し、かつ min+1 以上
   let max = toNum((src as any)?.max, 5);
-  max = Math.min(10, Math.max(2, Math.max(min + 1, max)));
+  max = Math.max(min + 1, Math.min(10, Math.max(2, max)));
 
   return {
     min,
     max,
-    minLabel: (src as any)?.minLabel ?? "",
-    maxLabel: (src as any)?.maxLabel ?? "",
+    minLabel: toStr((src as any)?.minLabel, ""),
+    maxLabel: toStr((src as any)?.maxLabel, ""),
   };
 }
 
-function normalizeScaleFromQuestion(q: Question): ScaleShape {
-  const src = (q as any).scale ?? {
-    min: (q as any).min,
-    max: (q as any).max,
-    // ★ タイポ注意: minLabel
-    minLabel: (q as any).minLabel,
-    maxLabel: (q as any).maxLabel,
-  };
+/** Question からスケール情報を抽出 → 正規化 */
+function normalizeScaleFromQuestion(q: Question): Scale {
+  const src =
+    (q as any).scale ??
+    {
+      min: (q as any).min,
+      max: (q as any).max,
+      minLabel: (q as any).minLabel, // ★ タイポ注意
+      maxLabel: (q as any).maxLabel,
+      // もし config に入ってくるケースがあるなら上書きで拾う
+      ...(q as any).config,
+    };
   return normalizeScale(src);
 }
 
+/* ===================== Component ===================== */
 export default function ScaleQuestion(props: Props) {
   const isAnswer = props.mode === "answer";
   const q = props.q;
 
-  // q 由来を常に正規化（1〜5固定フォールバック回避）
+  // q 由来を常に正規化（min/max/label を確実に揃える）
   const scale: Scale = normalizeScaleFromQuestion(q);
 
   const numbers = useMemo(() => {
@@ -68,26 +79,27 @@ export default function ScaleQuestion(props: Props) {
   }, [scale.min, scale.max]);
 
   const setScale = (patch: Partial<Scale>) => {
-  if (isAnswer) return;
-  const next = normalizeScale({ ...scale, ...patch });
-  (props as EditProps).onChange({
-    ...(q as any),
-    scale: next,
-    // 互換: top-level も書いておく
-    min: next.min,
-    max: next.max,
-    minLabel: next.minLabel,
-    maxLabel: next.maxLabel,
-    // ★ API が期待する場所にもミラー
-    config: {
+    if (isAnswer) return;
+    const next = normalizeScale({ ...scale, ...patch });
+
+    (props as EditProps).onChange({
+      ...(q as any),
+      scale: next,
+      // 互換: top-level にも書いておく（既存データ構造への配慮）
       min: next.min,
       max: next.max,
       minLabel: next.minLabel,
       maxLabel: next.maxLabel,
-    },
-  } as any);
-};
-
+      // API が期待する config にもミラー
+      config: {
+        ...(q as any).config,
+        min: next.min,
+        max: next.max,
+        minLabel: next.minLabel,
+        maxLabel: next.maxLabel,
+      },
+    } as any);
+  };
 
   if (!isAnswer) {
     const {
@@ -172,9 +184,7 @@ export default function ScaleQuestion(props: Props) {
             </div>
           )}
 
-          <p className="mt-2 text-xs text-slate-400">
-            プレビュー（作成画面では選択できません）
-          </p>
+          <p className="mt-2 text-xs text-slate-400">プレビュー（作成画面では選択できません）</p>
         </div>
       </div>
     );

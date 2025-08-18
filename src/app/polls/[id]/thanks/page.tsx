@@ -9,14 +9,20 @@ export const metadata: Metadata = {
   description: "アンケート送信完了ページ",
 };
 
-export default async function ThanksPage({ params }: { params: { id: string } }) {
-  const { id } = params;
+// ✅ Next.js 15 形式: params は Promise 経由
+type AsyncPageProps = {
+  params: Promise<{ id: string }>;
+};
+
+export default async function ThanksPage({ params }: AsyncPageProps) {
+  const { id } = await params;
 
   // セッション確認（ADMIN のみ運営ダッシュボードへ）
   const cookieStore = await cookies();
   const token = cookieStore.get(COOKIE_NAME)?.value || "";
   const session = token ? await verifyToken(token) : null;
-  const backHref = session && String((session as any).role) === "ADMIN" ? "/exec/polls" : "/polls";
+  const backHref =
+    session && String((session as any).role) === "ADMIN" ? "/exec/polls" : "/polls";
 
   return (
     <main className="min-h-screen bg-slate-50">
