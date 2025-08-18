@@ -1,26 +1,26 @@
 // src/app/p/[token]/page.tsx
 import type { Metadata, ResolvingMetadata } from "next";
 
-type PageProps = {
-  params: { token: string };
+type AsyncPageProps = {
+  // Next.js 15: params は Promise 経由
+  params: Promise<{ token: string }>;
+  // 必要なら:
   // searchParams?: Record<string, string | string[] | undefined>;
 };
 
-// ✅ 正しいシグネチャ（第1引数に { params }、第2引数は親メタ）
 export async function generateMetadata(
-  { params }: PageProps,
+  { params }: AsyncPageProps,
   _parent: ResolvingMetadata
 ): Promise<Metadata> {
-  const { token } = params;
+  const { token } = await params;
   return {
     title: `Preview - ${token}`,
     description: "リンクプレビュー",
   };
 }
 
-// ✅ ページ本体
-export default async function Page({ params }: PageProps) {
-  const { token } = params;
+export default async function Page({ params }: AsyncPageProps) {
+  const { token } = await params;
 
   // 必要ならここで token を使ってデータ取得
   // const res = await fetch(`${process.env.NEXT_PUBLIC_API}/p/${encodeURIComponent(token)}`, { cache: "no-store" });
