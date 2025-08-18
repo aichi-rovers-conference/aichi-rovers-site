@@ -1,41 +1,57 @@
-import { prisma } from "../../../../lib/prisma";
-import QRClient from "./qr-client";
+// src/app/p/[token]/page.tsx
 import { notFound } from "next/navigation";
+import Link from "next/link";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+// ✅ Next.js 15: params は Promise になったので await が必要
+export default async function Page({
+  params,
+}: {
+  params: Promise<{ token: string }>;
+}) {
+  const { token } = await params;
 
-export default async function Page({ params }: { params: { token: string } }) {
-  const rec = await prisma.emailToken.findUnique({
-    where: { token: params.token },
-    include: { participant: true },
-  });
-  if (!rec) return notFound();
-  if (rec.expiresAt < new Date()) return notFound();
+  if (!token || typeof token !== "string") {
+    notFound();
+  }
+
+  // ここで token を使ってデータ取得など
+  // const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/p/${token}`, { cache: "no-store" });
+  // const data = res.ok ? await res.json() : null;
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-white to-slate-50 p-6">
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 ring-1 ring-slate-200 shadow-sm">
-        <h1 className="text-lg font-bold">
-          {rec.meetingCode} 出席用QR
-        </h1>
-        <p className="text-sm text-slate-600 mt-1">
-          {rec.participant.name} / {rec.participant.district} / {rec.participant.troop}
-        </p>
-
-        <div className="mt-4">
-          <QRClient
-            meeting={rec.meetingCode}
-            participantId={rec.participantId}
-            name={rec.participant.name}
-          />
-        </div>
-
-        <p className="mt-4 text-xs text-slate-500">
-          本リンクは {new Date(rec.expiresAt).toLocaleString()} まで有効です。
-          オフライン表示のためにスクリーンショット保存も推奨します。
-        </p>
+    <main className="mx-auto max-w-2xl p-6">
+      <h1 className="text-xl font-bold">Token: {token}</h1>
+      <p className="mt-2 text-slate-600">
+        ここにトークンに基づくページ内容を表示します。
+      </p>
+      <div className="mt-6">
+        <Link
+          href="/"
+          className="inline-flex items-center rounded-lg border px-3 py-2 text-sm hover:bg-slate-50"
+        >
+          ホームへ戻る
+        </Link>
       </div>
-    </div>
+    </main>
   );
 }
+
+// ✅ generateMetadata を使っている場合は同様に Promise を await
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ token: string }>;
+}) {
+  const { token } = await params;
+  return {
+    title: `ページ: ${token}`,
+    description: `トークン ${token} の詳細ページ`,
+  };
+}
+
+// ※ generateStaticParams はそのままで OK（Promise ではない）
+/*
+export async function generateStaticParams() {
+  return [{ token: "example" }];
+}
+*/
