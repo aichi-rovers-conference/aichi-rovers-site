@@ -3,7 +3,6 @@ import React, { useMemo } from "react";
 import type { Question } from "./types";
 
 type Scale = NonNullable<Question["scale"]>;
-type ScaleShape = { min: 0 | 1; max: number; minLabel: string; maxLabel: string };
 
 type EditProps = {
   mode?: "edit" | "create";
@@ -28,29 +27,35 @@ const toNum = (x: unknown, fallback: number) => {
   return Number.isFinite(n) ? n : fallback;
 };
 
+/** Scale を正規化（min=0|1、maxは[min+1..10]、ラベルは常にstring） */
 function normalizeScale(src?: Partial<Scale>): Scale {
   const rawMin = (src as any)?.min;
-  const min = (rawMin === 0 || rawMin === "0") ? 0 : (1 as 0 | 1);
+  const min = rawMin === 0 || rawMin === "0" ? 0 : (1 as 0 | 1);
 
   let max = toNum((src as any)?.max, 5);
   max = Math.min(10, Math.max(2, Math.max(min + 1, max)));
 
-  return {
-    min,
-    max,
-    minLabel: (src as any)?.minLabel ?? "",
-    maxLabel: (src as any)?.maxLabel ?? "",
-  };
+  // ここで文字列を保証（undefined を空文字に）
+  const minLabel = ((src as any)?.minLabel ?? "") as string;
+  const maxLabel = ((src as any)?.maxLabel ?? "") as string;
+
+  // Scale の型（おそらく minLabel/maxLabel が optional）にそのまま適合
+  return { min, max, minLabel, maxLabel };
 }
 
-function normalizeScaleFromQuestion(q: Question): ScaleShape {
-  const src = (q as any).scale ?? {
-    min: (q as any).min,
-    max: (q as any).max,
-    // ★ タイポ注意: minLabel
-    minLabel: (q as any).minLabel,
-    maxLabel: (q as any).maxLabel,
-  };
+/** Question から scale 情報を吸い上げて正規化 */
+function normalizeScaleFromQuestion(q: Question): Scale {
+  const src =
+    (q as any).scale ??
+    ({
+      min: (q as any).min,
+      max: (q as any).max,
+      minLabel: (q as any).minLabel,
+      maxLabel: (q as any).maxLabel,
+      // 互換: 一部実装では q.config.* に入っている場合がある
+      ...(q as any).config,
+    } as Partial<Scale>);
+
   return normalizeScale(src);
 }
 
@@ -58,8 +63,8 @@ export default function ScaleQuestion(props: Props) {
   const isAnswer = props.mode === "answer";
   const q = props.q;
 
-  // q 由来を常に正規化（1〜5固定フォールバック回避）
-  const scale: Scale = normalizeScaleFromQuestion(q);
+  // q 由来のスケールを常に正規化
+  const scale = normalizeScaleFromQuestion(q);
 
   const numbers = useMemo(() => {
     const arr: number[] = [];
@@ -68,26 +73,27 @@ export default function ScaleQuestion(props: Props) {
   }, [scale.min, scale.max]);
 
   const setScale = (patch: Partial<Scale>) => {
-  if (isAnswer) return;
-  const next = normalizeScale({ ...scale, ...patch });
-  (props as EditProps).onChange({
-    ...(q as any),
-    scale: next,
-    // 互換: top-level も書いておく
-    min: next.min,
-    max: next.max,
-    minLabel: next.minLabel,
-    maxLabel: next.maxLabel,
-    // ★ API が期待する場所にもミラー
-    config: {
+    if (isAnswer) return;
+    const next = normalizeScale({ ...scale, ...patch });
+
+    (props as EditProps).onChange({
+      ...(q as any),
+      scale: next,
+      // 互換: top-level にもミラー
       min: next.min,
       max: next.max,
       minLabel: next.minLabel,
       maxLabel: next.maxLabel,
-    },
-  } as any);
-};
-
+      // 互換: config.* にもミラー（既存APIが期待する場合に備え）
+      config: {
+        ...(q as any).config,
+        min: next.min,
+        max: next.max,
+        minLabel: next.minLabel,
+        maxLabel: next.maxLabel,
+      },
+    } as any);
+  };
 
   if (!isAnswer) {
     const {
@@ -152,14 +158,14 @@ export default function ScaleQuestion(props: Props) {
             <input
               className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[15px] outline-none shadow-sm placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
               placeholder={placeholderMin}
-              value={scale.minLabel}
+              value={scale.minLabel ?? ""} // 念のため二重で空文字に
               onChange={(e) => setScale({ minLabel: e.target.value })}
               aria-label="最小側ラベル"
             />
             <input
               className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[15px] outline-none shadow-sm placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
               placeholder={placeholderMax}
-              value={scale.maxLabel}
+              value={scale.maxLabel ?? ""} // 念のため二重で空文字に
               onChange={(e) => setScale({ maxLabel: e.target.value })}
               aria-label="最大側ラベル"
             />
@@ -172,9 +178,7 @@ export default function ScaleQuestion(props: Props) {
             </div>
           )}
 
-          <p className="mt-2 text-xs text-slate-400">
-            プレビュー（作成画面では選択できません）
-          </p>
+          <p className="mt-2 text-xs text-slate-400">プレビュー（作成画面では選択できません）</p>
         </div>
       </div>
     );
