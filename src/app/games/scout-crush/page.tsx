@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { Transition } from "framer-motion";
+import Link from "next/link";
 
 // ====== 設定 ======
 const SIZE = 8;
@@ -30,11 +31,14 @@ const TIME_CHAIN_BONUS_RATE = 0.2;
 const SPRING_SLOW: Transition = { type: "spring", stiffness: 140, damping: 24 };
 
 // --- ヒント関連 ---
-const HINT_IDLE_MS = 8000;     // 最後のプレイヤー操作からこの時間でヒント
+const HINT_IDLE_MS = 8000;
 const FIRST_HINT_IDLE_MS = 12000;
 
 // --- resolveBoard オプション ---
 type ResolveOpts = { firstClearFromSpecial?: boolean };
+
+// --- スワイプしきい値(px) ---
+const SWIPE_THRESHOLD = 18;
 
 function Icon({ type, special }: { type: TileType; special?: Special }) {
   if (special === "propeller") return <span>🪶</span>;
@@ -66,10 +70,9 @@ function formatTime(ms: number) {
   return `${m}:${s.toString().padStart(2, "0")}.${ds}`;
 }
 
-// ==== ユーティリティ（詰み低減のコア）====
 function shuffleArray<T>(arr: T[]) {
   for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.random() * (i + 1) | 0;
+    const j = (Math.random() * (i + 1)) | 0;
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
 }
@@ -85,6 +88,9 @@ export default function Page() {
   // タイマー
   const [timeLeft, setTimeLeft] = useState(INITIAL_TIME_MS);
   const [started, setStarted] = useState(false);
+
+  // 説明モーダル
+  const [introOpen, setIntroOpen] = useState(true);
 
   // 視覚フィードバック
   const [chain, setChain] = useState(0);
@@ -104,15 +110,18 @@ export default function Page() {
   const [hasInteracted, setHasInteracted] = useState(false);
   const markAction = () => { setHasInteracted(true); setLastActionAt(Date.now()); setHint(null); };
 
+  // スワイプ判定用
+  const dragRef = useRef<{ startX: number; startY: number; startIdx: number; active: boolean; didSwipe: boolean } | null>(null);
+  const swipeJustHappenedRef = useRef(false);
+
   useEffect(() => {
     setMounted(true);
-    // 初期盤面：できるだけ「有効手あり & 即時クリアなし」を狙う
     let g = Array.from({ length: SIZE * SIZE }, () => newCell(true));
     g = ensurePlayableBoard(g);
     setGrid(g);
   }, []);
 
-  // 安定タイマー（100ms刻み）
+  // タイマー（100ms刻み）
   useEffect(() => {
     if (!mounted || !started) return;
     let alive = true;
@@ -141,7 +150,7 @@ export default function Page() {
   }
   function clone(g = grid) { return g.map((x) => ({ ...x })); }
 
-  // 最初に見つかった有効手（ヒント探索）
+  // ヒント探索（最初の有効手）
   function findFirstHint(g: Cell[]): { a: number; b: number } | null {
     const tryPair = (a: number, b: number) => {
       const tmp = g.map((x) => ({ ...x }));
@@ -161,7 +170,7 @@ export default function Page() {
   }
   const hasAnyMove = (g: Cell[]) => !!findFirstHint(g);
 
-  // 詰み検出（値が変化する時だけ反映）
+  // 詰み検出
   useEffect(() => {
     if (!mounted || busyRef.current || timeLeft <= 0 || grid.length === 0) return;
     const clears = findClears(grid);
@@ -172,10 +181,9 @@ export default function Page() {
 
   // 入れ替え
   async function trySwap(a: number, b: number) {
-    if (busyRef.current || timeLeft <= 0 || stuck) return;
+    if (!started || busyRef.current || timeLeft <= 0 || stuck) return;
     markAction();
     setBusy(true);
-    if (!started) setStarted(true);
 
     const original = clone();
     const g = clone();
@@ -201,15 +209,14 @@ export default function Page() {
     setBusy(false);
   }
 
-  // アイテム（スペシャル）ワンタップ発動
+  // アイテム発動
   async function activateSpecial(i: number) {
-    if (busyRef.current || timeLeft <= 0 || stuck) return;
+    if (!started || busyRef.current || timeLeft <= 0 || stuck) return;
     const cell = grid[i];
     if (!cell?.special) return;
     markAction();
     setBusy(true);
     setSelected(null);
-    if (!started) setStarted(true);
 
     const targets = new Set<number>();
     const r = Math.floor(i / SIZE);
@@ -242,7 +249,7 @@ export default function Page() {
     setBusy(false);
   }
 
-  // 4個以上の塊を探索
+  // 4個以上の塊
   function findClears(g: Cell[]) {
     const rm = new Set<number>();
     // 横
@@ -278,14 +285,12 @@ export default function Page() {
     return rm;
   }
 
-  // ===== 詰み低減：安定後に「遊べる盤面」へソフト調整 =====
+  // 詰み低減：遊べる盤面へ調整
   function ensurePlayableBoard(g0: Cell[]): Cell[] {
     let g = g0.map(x => ({ ...x }));
-
     const noClears = () => findClears(g).size === 0;
     const moveOk = () => hasAnyMove(g);
 
-    // まず「freshセルだけ」のタイプ入れ替えで作る（最大12回）
     const freshIdx = g.map((c, i) => c.fresh ? i : -1).filter(i => i >= 0);
     for (let t = 0; t < 12; t++) {
       if (noClears() && moveOk()) return g;
@@ -295,7 +300,6 @@ export default function Page() {
       freshIdx.forEach((i, k) => { g[i] = { ...g[i], type: types[k] }; });
     }
 
-    // まだ詰み気味なら「全体のタイプだけ」入れ替え（最大6回）
     const allIdx = g.map((_, i) => i);
     for (let t = 0; t < 6; t++) {
       if (noClears() && moveOk()) return g;
@@ -303,12 +307,10 @@ export default function Page() {
       shuffleArray(types);
       allIdx.forEach((i, k) => { g[i] = { ...g[i], type: types[k] }; });
     }
-
-    // ここまでで作れなければ元のまま返す（オーバーレイで手動シャッフル）
     return g0;
   }
 
-  // ★ スペシャル由来の最初のパスではスペシャル生成を抑制
+  // 盤面解決
   async function resolveBoard(startGrid: Cell[], firstClears: Set<number>, opts: ResolveOpts = {}) {
     let g = startGrid.map((x) => ({ ...x }));
     let combo = 0;
@@ -329,14 +331,12 @@ export default function Page() {
 
       const suppressSpecialThisPass = opts.firstClearFromSpecial === true && combo === 1;
 
-      // 特殊生成（5個以上）。 suppress 中は生成しない
       if (!suppressSpecialThisPass && clears.size >= 5) {
         const pick = [...clears][Math.floor(Math.random() * clears.size)];
         g[pick] = { ...g[pick], special: clears.size >= 6 ? "bomb" : "firework", id: crypto.randomUUID(), fresh: false };
         clears.delete(pick);
       }
 
-      // 消去→重力→補充
       const holes: (Cell | null)[] = g.map((cell, i) => (clears.has(i) ? null : { ...cell, fresh: false }));
       for (let c = 0; c < SIZE; c++) {
         const col: (Cell | null)[] = [];
@@ -359,30 +359,62 @@ export default function Page() {
     }
     setChain(0);
 
-    // ★ 安定後：できるだけ「詰みにくい」盤面へソフト調整
     const tuned = ensurePlayableBoard(g);
     if (tuned !== g) {
       g = tuned;
       setGrid(g.map(x => ({ ...x })));
     }
 
-    // 連鎖終了後に詰み判定
     const nextStuck = (findClears(g).size === 0) && (findFirstHint(g) === null);
     setStuck((prev) => (prev === nextStuck ? prev : nextStuck));
   }
 
   function wait(ms: number) { return new Promise(res => setTimeout(res, ms)); }
 
-  function onClickCell(i: number) {
-    if (timeLeft <= 0 || busyRef.current) return;
+  // === タップ＆スライド対応 ===
+  function handlePointerDown(i: number, e: React.PointerEvent) {
+    if (!started || timeLeft <= 0 || busyRef.current || stuck) return;
+    (e.currentTarget as any).setPointerCapture?.(e.pointerId);
+    dragRef.current = { startX: e.clientX, startY: e.clientY, startIdx: i, active: true, didSwipe: false };
+  }
+  function handlePointerMove(e: React.PointerEvent) {
+    const d = dragRef.current;
+    if (!d || !d.active || d.didSwipe) return;
+    const dx = e.clientX - d.startX;
+    const dy = e.clientY - d.startY;
+    const adx = Math.abs(dx), ady = Math.abs(dy);
+    if (adx < SWIPE_THRESHOLD && ady < SWIPE_THRESHOLD) return;
 
-    // クリック＝操作（ヒントタイマーリセット）
+    const n = neighbors(d.startIdx);
+    let target: number | null = null;
+    if (adx >= ady) target = dx > 0 ? n.right : n.left;
+    else target = dy > 0 ? n.down : n.up;
+
+    if (target !== null) {
+      d.didSwipe = true;
+      d.active = false;
+      swipeJustHappenedRef.current = true;
+      trySwap(d.startIdx, target);
+    }
+  }
+  function handlePointerEnd() {
+    const d = dragRef.current;
+    if (!d) return;
+    d.active = false;
+  }
+
+  function onClickCell(i: number) {
+    if (!started || timeLeft <= 0 || busyRef.current) return;
+
+    if (swipeJustHappenedRef.current) {
+      swipeJustHappenedRef.current = false;
+      return;
+    }
+
     markAction();
 
-    // スペシャルはワンタップ発動
     if (grid[i]?.special) { activateSpecial(i); return; }
 
-    // 通常は2タップ入れ替え
     setHint(null);
     if (selected === null) { setSelected(i); return; }
     const n = neighbors(selected);
@@ -428,29 +460,37 @@ export default function Page() {
     })();
   }, []);
 
-  // ===== ヒント表示：プレイヤーの操作がしばらく無い時だけ =====
+  // ヒント（放置時のみ）
   useEffect(() => {
-    if (timeLeft <= 0 || stuck) { setHint(null); return; }
-
-    const CHECK_MS = 250; // 4回/秒で軽くチェック
+    if (!started || timeLeft <= 0 || stuck) { setHint(null); return; }
+    const CHECK_MS = 250;
     const id = setInterval(() => {
-      if (busyRef.current) return; // アニメ/連鎖中は出さない
-
-      // 初回操作前は FIRST_HINT_IDLE_MS、操作後は HINT_IDLE_MS
+      if (busyRef.current) return;
       const threshold = hasInteracted ? HINT_IDLE_MS : FIRST_HINT_IDLE_MS;
       const idleFor = Date.now() - lastActionAt;
-
       if (idleFor >= threshold) {
-        const h = findFirstHint(grid); // 有効手がないなら null
+        const h = findFirstHint(grid);
         setHint(prev => {
           const same = (prev?.a === h?.a && prev?.b === h?.b) || (!prev && !h);
           return same ? prev : h;
         });
       }
     }, CHECK_MS);
-
     return () => clearInterval(id);
-  }, [lastActionAt, grid, timeLeft, stuck, hasInteracted]);
+  }, [started, lastActionAt, grid, timeLeft, stuck, hasInteracted]);
+
+  function handleStart() {
+    setIntroOpen(false);
+    setStarted(true);
+    setTimeLeft(INITIAL_TIME_MS);
+    setScore(0);
+    setChain(0);
+    setStuck(false);
+    setHasInteracted(false);
+    setLastActionAt(Date.now());
+    setHint(null);
+    setSelected(null);
+  }
 
   if (!mounted || grid.length === 0) {
     return (
@@ -467,16 +507,16 @@ export default function Page() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-white to-slate-50">
-      {/* 右側固定タイムバー */}
-      <div className="fixed right-4 top-24 bottom-24 z-40 w-3 rounded-full bg-slate-200/70 border border-slate-300 overflow-hidden shadow-inner">
+      {/* PC/タブレット: 右側固定タイムバー */}
+      <div className="hidden md:block fixed right-4 top-24 bottom-24 z-40 w-3 rounded-full bg-slate-200/70 border border-slate-300 overflow-hidden shadow-inner">
         <div
           className={`absolute left-0 right-0 bottom-0 ${timePct < 25 ? "bg-rose-500" : timePct < 50 ? "bg-amber-500" : "bg-emerald-500"}`}
           style={{ height: `${timePct}%` }}
         />
       </div>
 
-      {/* 連鎖/トースト（盤面に影響しない） */}
-      <div className="fixed top-24 right-16 z-40 pointer-events-none">
+      {/* 連鎖/トースト */}
+      <div className="fixed top-24 right-16 z-40 pointer-events-none hidden md:block">
         <AnimatePresence>
           {chain > 0 && (
             <motion.div
@@ -510,13 +550,22 @@ export default function Page() {
       <div className="mx-auto max-w-5xl p-4 md:p-8">
         <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
           <div>
+            {/* ← 追加：ゲーム一覧に戻る */}
+            <Link
+              href="/games"
+              className="inline-flex items-center gap-1 text-sm px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 shadow-sm mb-2 md:mb-3"
+              aria-label="ゲーム一覧へ戻る"
+            >
+              ← ゲーム一覧へ
+            </Link>
+
             <h1 className="text-3xl md:text-4xl font-extrabold">Scout Crush</h1>
             <p className="text-slate-600">4個以上で消えるタイムアタック。時間が増えるうちにスコアを伸ばせ！</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <input
               value={playerName}
-              onChange={e => { setPlayerName(e.target.value); /* 入力は操作とみなさない */ }}
+              onChange={e => setPlayerName(e.target.value)}
               placeholder="名前(任意)"
               className="rounded-xl border px-3 py-2"
             />
@@ -525,11 +574,11 @@ export default function Page() {
             </div>
             <button
               onClick={() => {
-                markAction();
                 const fresh = Array.from({ length: SIZE * SIZE }, () => newCell(true));
                 setGrid(ensurePlayableBoard(fresh));
                 setScore(0); setChain(0); setHint(null); setStuck(false);
                 setTimeLeft(INITIAL_TIME_MS); setStarted(false);
+                setIntroOpen(true);
               }}
               className="rounded-xl bg-indigo-600 text-white px-4 py-2 shadow"
             >
@@ -542,10 +591,24 @@ export default function Page() {
         </header>
 
         <main className="mt-6 grid md:grid-cols-[1fr_320px] gap-6">
+          {/* スマホ: 盤面上に横タイムバー */}
+          <div className="md:hidden -mt-2 mb-2">
+            <div className="mx-auto w-full max-w-[420px] h-3 rounded-full bg-slate-200/70 border border-slate-300 overflow-hidden shadow-inner">
+              <div
+                className={`${timePct < 25 ? "bg-rose-500" : timePct < 50 ? "bg-amber-500" : "bg-emerald-500"} h-full`}
+                style={{ width: `${timePct}%` }}
+              />
+            </div>
+          </div>
+
           {/* Board */}
           <div className="flex items-center justify-center">
             <div className="relative overflow-hidden">
-              <div className="grid grid-cols-8 gap-1 p-2 rounded-2xl bg-white border shadow select-none">
+              {/* touchAction: none でスマホのスクロール誤作動を抑止 */}
+              <div
+                className="grid grid-cols-8 gap-1 p-2 rounded-2xl bg-white border shadow select-none"
+                style={{ touchAction: "none" }}
+              >
                 {grid.map((cell, i) => {
                   const isSel = selected === i;
                   const n = selected !== null ? neighbors(selected) : { up: null, down: null, left: null, right: null };
@@ -565,13 +628,17 @@ export default function Page() {
                     <motion.button
                       key={cell.id}
                       onClick={() => onClickCell(i)}
+                      onPointerDown={(e) => handlePointerDown(i, e)}
+                      onPointerMove={handlePointerMove}
+                      onPointerUp={handlePointerEnd}
+                      onPointerCancel={handlePointerEnd}
                       className={`h-12 w-12 md:h-14 md:w-14 grid place-items-center rounded-xl border text-2xl ${ring} ${clearing.has(i) ? "opacity-75" : ""}`}
                       layout
                       initial={{ y: initialY, opacity: cell.fresh ? 0 : 1 }}
                       animate={{ y: 0, opacity: 1, scale: clearing.has(i) ? 0.92 : 1 }}
                       transition={SPRING_SLOW}
                       whileTap={{ scale: 0.92 }}
-                      disabled={timeLeft <= 0 || busy || stuck}
+                      disabled={!started || timeLeft <= 0 || busy || stuck}
                     >
                       <Icon type={cell.type} special={cell.special} />
                     </motion.button>
@@ -637,12 +704,75 @@ export default function Page() {
             </ol>
           </aside>
         </main>
-
-        <p className="mt-6 text-slate-500 text-sm">
-          ※ 初回操作まではヒント非表示。最後の操作から {HINT_IDLE_MS / 1000} 秒放置でヒントが点滅します。<br />
-          ※ 連鎖終了後に盤面を“遊びやすい”配置へ軽く調整して、詰みを起きにくくしています。
-        </p>
       </div>
+
+      {/* 説明モーダル */}
+      <AnimatePresence>
+        {introOpen && (
+          <motion.div
+            className="fixed inset-0 z-50 grid place-items-center bg-black/40"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              className="rounded-2xl bg-white px-6 py-6 md:px-8 md:py-7 shadow-2xl w-[min(92vw,680px)]"
+              initial={{ scale: 0.9, y: 10, opacity: 0 }}
+              animate={{ scale: 1, y: 0, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 160, damping: 20 }}
+            >
+              <h3 className="text-xl md:text-2xl font-extrabold">Scout Crush の遊び方</h3>
+              <p className="mt-2 text-slate-600 text-sm md:text-base">
+                8×8で隣を入れ替え<strong>同柄4つ以上</strong>で消去。消すたび<strong>スコア</strong>＆<strong>時間</strong>UP、<strong>連鎖</strong>でボーナスUP！
+              </p>
+
+              <div className="mt-4 grid md:grid-cols-2 gap-4">
+                <div className="rounded-xl border bg-slate-50/60 p-3">
+                  <h4 className="font-bold text-slate-800">操作</h4>
+                  <ul className="mt-2 text-sm text-slate-700 space-y-1.5 list-disc pl-5">
+                    <li>ワンタップ選択 → 隣をタップで入れ替え</li>
+                    <li><b>タップ＆スライド</b>でも入れ替え可（上下左右にスワイプ）</li>
+                    <li>スマホは<strong>横バー</strong>、PC/タブレットは<strong>右の縦バー</strong>が残り時間</li>
+                  </ul>
+                </div>
+
+                <div className="rounded-xl border bg-slate-50/60 p-3">
+                  <h4 className="font-bold text-slate-800">スペシャル（ワンタップ発動）</h4>
+                  <ul className="mt-2 text-sm text-slate-700 space-y-1.5">
+                    <li>🪶 <b>Propeller</b>：その行＋列を一掃</li>
+                    <li>🎆 <b>Firework</b>：横一列を一掃</li>
+                    <li>💣 <b>Bomb</b>：周囲3×3を爆破</li>
+                    <li>✨ <b>Mystic</b>：同じ絵柄をまとめて消去</li>
+                  </ul>
+                </div>
+              </div>
+              <div className="mt-5 flex flex-wrap gap-2 justify-center">
+                <button
+                  onClick={handleStart}
+                  className="rounded-xl bg-indigo-600 text-white px-5 py-2.5 shadow"
+                >
+                  ゲーム開始
+                </button>
+                <button
+                  onClick={() => setIntroOpen(false)}
+                  className="rounded-xl bg-slate-200 text-slate-800 px-5 py-2.5 shadow"
+                >
+                  閉じる（開始しない）
+                </button>
+                {/* ← 追加：ゲーム一覧へ */}
+                <Link
+                  href="/games"
+                  className="rounded-xl bg-white border border-slate-300 text-slate-700 px-5 py-2.5 shadow"
+                  aria-label="ゲーム一覧へ"
+                >
+                  ゲーム一覧へ
+                </Link>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -43,14 +43,14 @@ const GAMES: Game[] = [
     description: "制限時間内にできるだけ早く火起こしをしよう！",
     href: "/games/fire-start",
     imageUrl: "/images/games/trivia.jpg",
-    badge: "New",
   },
   {
     key: "puzzle",
     title: "スライドパズル",
-    description: "空白を使ってピースを揃えるクラシックパズル。",
+    description: "連鎖で一気に稼げ！時間が尽きる前に高スコアを狙うタイムアタック。",
     href: "/games/scout-crush",
     imageUrl: "/images/games/puzzle.jpg",
+    badge: "New",
   },
 ];
 
