@@ -49,7 +49,7 @@ const GAMES: Game[] = [
     key: "puzzle",
     title: "スライドパズル",
     description: "空白を使ってピースを揃えるクラシックパズル。",
-    href: "/games/puzzle",
+    href: "/games/scout-crush",
     imageUrl: "/images/games/puzzle.jpg",
   },
 ];

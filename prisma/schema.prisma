@@ -35,6 +35,17 @@ enum District {
   OTHERS         @map("その他地区")
 }
 
+model GameScore {
+  id        String   @id @default(cuid())
+  game      String   // 例: "scout-crush"
+  name      String
+  score     Int
+  movesUsed Int?
+  createdAt DateTime @default(now())
+
+  @@index([game, score])
+}
+
 model ConferenceRound {
   id        String   @id @default(cuid())
   fy        String                 // 例: "2025" or "R6"（どちらでもOK）
