@@ -150,21 +150,52 @@ export default function CampsiteGame() {
 
   return (
     <div className="w-full bg-white">
-      {/* タイトル帯（ヒーロー画像なし） */}
+      {/* タイトル帯（PCそのまま / モバイルは簡潔） */}
       <div className="w-full border-b border-gray-200 bg-white">
-        <div className="max-w-6xl mx-auto px-6 md:px-16 py-6">
-          <h1 className="text-3xl md:text-4xl font-extrabold text-gray-900">キャンプサイトを探せ！</h1>
-          <p className="mt-1 text-gray-900 font-medium text-[18px] md:text-[19px] leading-[1.9]">
+        <div className="max-w-6xl mx-auto px-4 md:px-16 py-4 md:py-6">
+          <h1 className="text-2xl md:text-4xl font-extrabold text-gray-900">キャンプサイトを探せ！</h1>
+          <p className="mt-1 hidden md:block text-gray-900 font-medium text-[18px] md:text-[19px] leading-[1.9]">
             水辺💧や道🥾から十分に離れた場所を選ぼう（Leave No Trace）
           </p>
+
+          {/* モバイルでは折りたたみ */}
+          <details className="md:hidden mt-2">
+            <summary className="cursor-pointer text-gray-900 font-semibold">遊び方（タップで開く）</summary>
+            <div className="mt-2 text-gray-900/90 text-[15px] leading-[1.9]">
+              <p>安全で自然に優しいキャンプサイトを選びましょう：</p>
+              <ul className="list-disc pl-5 space-y-1 mt-1">
+                <li>💧水辺（water）と🥾道（trail）から<strong>{MIN_DIST}マス以上</strong> 離れる</li>
+                <li>🌿草地（meadow）や⛰️崖（cliff）の上は避ける</li>
+              </ul>
+            </div>
+          </details>
         </div>
       </div>
 
+      {/* 固定トースト（レイアウトに影響しない） */}
+      <div className="fixed top-16 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
+        <AnimatePresence>
+          {msg && (
+            <motion.div
+              key={msg.text + msg.type}
+              initial={{ y: 8, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: -8, opacity: 0 }}
+              className={`rounded-lg border px-3 py-2 text-sm md:text-base shadow ${
+                msg.type === "ok" ? "border-green-500/60 bg-green-50 text-green-800" : "border-rose-500/60 bg-rose-50 text-rose-800"
+              }`}
+            >
+              {msg.text}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
       {/* 本文 */}
-      <main className="w-full py-8 px-6 md:px-16">
+      <main className="w-full py-6 md:py-8 px-4 md:px-16">
         <div className="max-w-6xl mx-auto">
-          {/* HUD */}
-          <div className="flex flex-wrap items-center gap-4 justify-between mb-5">
+          {/* HUD（PCは従来 / モバイルは下部固定バーに移動） */}
+          <div className="hidden md:flex flex-wrap items-center gap-4 justify-between mb-5">
             <div className="flex items-center gap-6 text-gray-900 font-medium text-base md:text-lg">
               <span>ラウンド：<b className="font-bold">{round}</b></span>
               <span>スコア：<b className="font-bold">{score}</b></span>
@@ -175,15 +206,15 @@ export default function CampsiteGame() {
                 className="px-3 py-2 rounded-lg border border-gray-400 bg-white hover:-translate-y-[1px] transition text-gray-900 font-medium">
                 盤面リロード
               </button>
-              <button onClick={resetAll}
+              <button onClick={() => { setRound(1); setScore(0); setLives(INIT_LIVES); setSeed((s)=>s+1); setMsg(null); }}
                 className="px-3 py-2 rounded-lg border border-red-600 bg-white font-bold hover:-translate-y-[1px] transition text-gray-900">
                 リセット
               </button>
             </div>
           </div>
 
-          {/* ルール */}
-          <div className="mb-4 space-y-2 text-gray-900 font-medium text-[18px] md:text-[19px] leading-[1.9]">
+          {/* ルール（PCのみ常時表示） */}
+          <div className="hidden md:block mb-4 space-y-2 text-gray-900 font-medium text-[18px] md:text-[19px] leading-[1.9]">
             <p>安全で自然に優しいキャンプサイトを選びましょう：</p>
             <ul className="list-disc pl-6 space-y-1">
               <li>💧水辺（<b>water</b>）と🥾道（<b>trail</b>）から<strong>{MIN_DIST}マス以上</strong> 離れる</li>
@@ -191,42 +222,29 @@ export default function CampsiteGame() {
             </ul>
           </div>
 
-          {/* 凡例 */}
-          <Legend />
+          {/* 凡例（モバイルは軽量に） */}
+          <div className="mb-3">
+            <Legend isMobile />
+          </div>
 
-          {/* 盤面（初回はスケルトン） */}
-          {map ? (
-            <Board grid={map.grid} onPick={onPick} gameOver={gameOver} />
-          ) : (
-            <SkeletonBoard />
-          )}
+          {/* 盤面（スマホは幅フィット・PCは従来） */}
+          <div className="flex justify-center md:justify-start">
+            <div className="w-full md:w-auto" style={{ maxWidth: "min(92vw, 520px)" }}>
+              {map ? (
+                <Board grid={map.grid} onPick={onPick} gameOver={gameOver} />
+              ) : (
+                <SkeletonBoard />
+              )}
+            </div>
+          </div>
 
-          {/* メッセージ */}
-          <AnimatePresence>
-            {msg && (
-              <motion.div
-                key={msg.text + msg.type}
-                initial={{ y: 12, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                exit={{ y: -12, opacity: 0 }}
-                className={`mt-5 rounded-xl border p-4 ${
-                  msg.type === "ok" ? "border-green-500/60 bg-green-50" : "border-rose-500/60 bg-rose-50"
-                }`}
-              >
-                <div className="text-gray-900 font-medium text-[18px] md:text-[19px] leading-[1.9]">
-                  {msg.text}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* ゲームオーバー */}
+          {/* ゲームオーバー（PCの下 / モバイルは下部バー上方に余白を確保） */}
           {gameOver && (
-            <div className="mt-6 text-center">
+            <div className="mt-6 text-center mb-28 md:mb-0">
               <div className="text-2xl font-extrabold mb-2 text-gray-900">ゲームオーバー</div>
               <div className="mb-4 text-gray-900 font-medium text-[18px] md:text-[19px] leading-[1.9]">スコア：{score}</div>
               <button
-                onClick={resetAll}
+                onClick={() => { setRound(1); setScore(0); setLives(INIT_LIVES); setSeed((s)=>s+1); setMsg(null); }}
                 className="px-4 py-2 rounded-lg border border-red-600 bg-white font-bold hover:-translate-y-[1px] transition text-gray-900"
               >
                 もう一度
@@ -234,8 +252,8 @@ export default function CampsiteGame() {
             </div>
           )}
 
-          {/* 学び */}
-          <section className="mt-10">
+          {/* 学び（PCのみ） */}
+          <section className="mt-10 hidden md:block">
             <h2 className="text-gray-900 text-2xl md:text-3xl font-extrabold tracking-tight">自然を大切に（Leave No Trace）</h2>
             <div className="mt-2 h-[2px] w-16 bg-red-600 rounded-full" />
             <div className="mt-3 space-y-2 text-gray-900 font-medium text-[18px] md:text-[19px] leading-[1.9]">
@@ -244,6 +262,37 @@ export default function CampsiteGame() {
           </section>
         </div>
       </main>
+
+      {/* モバイル下部固定バー（親指操作しやすい） */}
+      <div className="md:hidden fixed bottom-0 inset-x-0 z-50">
+        <div className="mx-auto w-full max-w-[560px] px-3 pb-[max(env(safe-area-inset-bottom),12px)]">
+          <div className="rounded-t-2xl border border-gray-300 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/70 shadow-lg">
+            <div className="px-3 py-2 flex items-center justify-between">
+              <div className="flex items-center gap-3 text-[13px] text-gray-900">
+                <span>ラウンド<b className="ml-1">{round}</b></span>
+                <span>スコア<b className="ml-1">{score}</b></span>
+                <span>ライフ<b className="ml-1">{("❤️".repeat(Math.max(lives, 0)) || "💔")}</b></span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setSeed((s) => s + 1)}
+                  className="px-2.5 py-1.5 rounded-lg border border-gray-400 bg-white text-[13px] active:translate-y-[1px]"
+                >
+                  リロード
+                </button>
+                <button
+                  onClick={() => { setRound(1); setScore(0); setLives(INIT_LIVES); setSeed((s)=>s+1); setMsg(null); }}
+                  className="px-2.5 py-1.5 rounded-lg border border-red-600 bg-white text-[13px] font-bold active:translate-y-[1px]"
+                >
+                  リセット
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        {/* 盤面が隠れないよう下余白を確保（スマホのみ） */}
+        <div className="h-[64px]" />
+      </div>
     </div>
   );
 }
@@ -253,7 +302,7 @@ function SkeletonBoard() {
   return (
     <div
       className="grid"
-      style={{ gridTemplateColumns: `repeat(${SIZE}, minmax(0, 1fr))`, gap: "6px" }}
+      style={{ gridTemplateColumns: `repeat(${SIZE}, minmax(0, 1fr))`, gap: "4px" }}
       aria-hidden="true"
     >
       {Array.from({ length: SIZE * SIZE }).map((_, i) => (
@@ -276,7 +325,7 @@ function Board({
   return (
     <div
       className="grid"
-      style={{ gridTemplateColumns: `repeat(${grid.length}, minmax(0, 1fr))`, gap: "6px" }}
+      style={{ gridTemplateColumns: `repeat(${grid.length}, minmax(0, 1fr))`, gap: "4px" }}
     >
       {grid.map((row, r) =>
         row.map((t, c) => (
@@ -289,7 +338,7 @@ function Board({
 
 function TileView({ type, onClick }: { type: Tile; onClick: () => void }) {
   const base =
-    "relative aspect-square rounded-lg border text-lg md:text-xl grid place-items-center select-none focus:outline-none focus:ring-2 focus:ring-red-600";
+    "relative aspect-square rounded-lg border grid place-items-center select-none focus:outline-none focus:ring-2 focus:ring-red-600";
   const styles: Record<Tile, string> = {
     empty:  "bg-white border-gray-300 hover:border-gray-400 hover:shadow-md transition cursor-pointer",
     water:  "bg-blue-50 border-blue-400 text-blue-800",
@@ -302,7 +351,7 @@ function TileView({ type, onClick }: { type: Tile; onClick: () => void }) {
   return (
     <motion.button
       whileTap={{ scale: 0.97 }}
-      className={`${base} ${styles[type]}`}
+      className={`${base} ${styles[type]} text-base md:text-xl`}
       onClick={onClick}
       aria-label={type === "empty" ? "選択する" : emoji[type]}
     >
@@ -312,20 +361,20 @@ function TileView({ type, onClick }: { type: Tile; onClick: () => void }) {
 }
 
 /* ========= 凡例 ========= */
-function Legend() {
+function Legend({ isMobile = false }: { isMobile?: boolean }) {
   const item = (emoji: string, label: string, cls = "") => (
-    <div className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 ${cls}`}>
-      <span className="text-lg">{emoji}</span>
-      <span className="text-gray-900 text-[16px] md:text-[17px] leading-[1.8]">{label}</span>
+    <div className={`inline-flex items-center gap-2 rounded-lg border px-2.5 py-1.5 ${cls}`}>
+      <span className="text-base md:text-lg">{emoji}</span>
+      <span className={`text-gray-900 ${isMobile ? "text-[13px]" : "text-[16px] md:text-[17px]"} leading-[1.8]`}>{label}</span>
     </div>
   );
   return (
-    <div className="flex flex-wrap items-center gap-2 mb-3">
+    <div className="flex flex-wrap items-center gap-2">
       {item("💧", "water（川・湖）", "bg-blue-50 border-blue-400")}
       {item("🥾", "trail（道）", "bg-amber-50 border-amber-500")}
       {item("🌿", "meadow（草地）", "bg-green-50 border-green-500")}
       {item("⛰️", "cliff（崖）", "bg-gray-100 border-gray-500")}
-      <div className="ml-auto text-gray-900/90 text-sm">※ 水・道から2マス以上離す</div>
+      <div className={`ml-auto text-gray-900/90 ${isMobile ? "text-[12px]" : "text-sm"}`}>※ 水・道から2マス以上離す</div>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 // app/games/fire-start/FireStart.tsx
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import "./styles.css";
 import Leaderboard from "./Leaderboard";
@@ -8,7 +8,7 @@ import Leaderboard from "./Leaderboard";
 type Result = { score: number; success: boolean };
 
 /* ======================= Canvas Flame ======================= */
-function CanvasFlame({ power }: { power: number }) {
+function CanvasFlame({ power, width, height }: { power: number; width: number; height: number }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const tRef = useRef(0);
@@ -17,11 +17,9 @@ function CanvasFlame({ power }: { power: number }) {
     const c = canvasRef.current;
     if (!c) return;
     const dpr = Math.max(1, window.devicePixelRatio || 1);
-    const cssW = c.clientWidth;
-    const cssH = c.clientHeight;
-    if (c.width !== Math.round(cssW * dpr) || c.height !== Math.round(cssH * dpr)) {
-      c.width = Math.round(cssW * dpr);
-      c.height = Math.round(cssH * dpr);
+    if (c.width !== Math.round(width * dpr) || c.height !== Math.round(height * dpr)) {
+      c.width = Math.round(width * dpr);
+      c.height = Math.round(height * dpr);
     }
   };
 
@@ -30,7 +28,7 @@ function CanvasFlame({ power }: { power: number }) {
     const onResize = () => resize();
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, []);
+  }, [width, height]);
 
   useEffect(() => {
     const c = canvasRef.current;
@@ -120,7 +118,7 @@ function CanvasFlame({ power }: { power: number }) {
 
       drawLayer({ color: "rgb(220,40,0)", alpha: 0.9,  height: baseH * 1.15, width: baseW * 1.25, blur: 24, wobble: wobble * 1.0, tightness: 1.4, lift: 0  });
       drawLayer({ color: "rgb(255,90,0)", alpha: 0.85, height: baseH * 1.05, width: baseW * 1.05, blur: 18, wobble: wobble * 0.9,  tightness: 1.55, lift: 4  });
-      drawLayer({ color: "rgb(255,150,0)",alpha: 0.8,  height: baseH * 0.95, width: baseW * 0.9,  blur: 14, wobble: wobble * 0.75, tightness: 1.75, lift: 8  });
+      drawLayer({ color: "rgb(255,150,0)",alpha: 0.8,  height: baseH * 0.95, width: baseW * 0.9,  blur: 14, wobble: wobble * 0.75, tightness: 1.75,  lift: 8  });
       drawLayer({ color: "rgb(255,210,60)",alpha: 0.85, height: baseH * 0.82, width: baseW * 0.75, blur: 10, wobble: wobble * 0.6,  tightness: 2.0,  lift: 12 });
       drawLayer({ color: "rgb(255,255,255)",alpha: 0.9,  height: baseH * 0.68, width: baseW * 0.6,  blur: 8,  wobble: wobble * 0.45, tightness: 2.3,  lift: 16 });
 
@@ -132,13 +130,13 @@ function CanvasFlame({ power }: { power: number }) {
 
     rafRef.current = requestAnimationFrame(tick);
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [power]);
+  }, [power, width, height]);
 
   return (
     <canvas
       ref={canvasRef}
       className="fire-canvas"
-      style={{ width: "320px", height: "360px" }}
+      style={{ width, height }}
       aria-label="animated flame"
     />
   );
@@ -149,8 +147,8 @@ export default function FireStart() {
   const DURATION = 25;
 
   const finishedRef = useRef(false);
-  const runningRef = useRef(false);
-  const startAtRef = useRef<number | null>(null);
+  const runningRef  = useRef(false);
+  const startAtRef  = useRef<number | null>(null);
 
   const [playerName, setPlayerName] = useState<string>(() => {
     if (typeof window === "undefined") return "";
@@ -159,25 +157,43 @@ export default function FireStart() {
   const [lbRefresh, setLbRefresh] = useState(0);
 
   const [hasStarted, setHasStarted] = useState(false);
-  const [running, setRunning] = useState(false);
+  const [showHelp, setShowHelp]     = useState(false);
+  const [running, setRunning]       = useState(false);
 
-  const [time, setTime] = useState(DURATION);
-  const [power, setPower] = useState(0);
-  const [heat, setHeat] = useState(0);
-  const [combo, setCombo] = useState(0);
+  const [time, setTime]     = useState(DURATION);
+  const [power, setPower]   = useState(0);
+  const [heat, setHeat]     = useState(0);
+  const [combo, setCombo]   = useState(0);
   const [maxCombo, setMaxCombo] = useState(0);
-  const [wind, setWind] = useState(0);
+  const [wind, setWind]     = useState(0);
   const [message, setMessage] = useState<string>("");
-  const [result, setResult] = useState<Result | null>(null);
-  const [best, setBest] = useState<number>(() => {
+  const [result, setResult]   = useState<Result | null>(null);
+  const [best, setBest]       = useState<number>(() => {
     if (typeof window === "undefined") return 0;
     const v = Number(localStorage.getItem("fireStartBest") || "0");
     return Number.isFinite(v) ? v : 0;
   });
 
+  // ---- スコアの正確化：常に最新値を ref に保持（finish で使用） ----
+  const powerRef = useRef(0);
+  const timeRef  = useRef(DURATION);
+  const maxComboRef = useRef(0);
+  useEffect(() => { powerRef.current = power; }, [power]);
+  useEffect(() => { timeRef.current  = time;  }, [time]);
+  useEffect(() => { maxComboRef.current = maxCombo; }, [maxCombo]);
+
+  // モバイル判定（レイアウト最適化）
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const check = () => setIsMobile(window.matchMedia("(max-width: 640px)").matches);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+
   const meterPhaseRef = useRef(0);
-  const meterDirRef = useRef<1 | -1>(1);
-  const lastTsRef = useRef<number | null>(null);
+  const meterDirRef   = useRef<1 | -1>(1);
+  const lastTsRef     = useRef<number | null>(null);
 
   useEffect(() => { runningRef.current = running; }, [running]);
 
@@ -204,24 +220,26 @@ export default function FireStart() {
       const windDrag = Math.max(0, Math.abs(wind) - 0.8) * 0.18;
       if (windDrag > 0) setPower((p) => Math.max(0, p - windDrag * dt * 60));
 
-      // クリア判定（← ここで finishedRef を触らない）
+      // 残り時間（絶対時刻）— まず ref を更新
+      const startedAt = startAtRef.current ?? ts;
+      const elapsed = Math.max(0, (ts - startedAt) / 1000);
+      const remain  = Math.max(0, DURATION - elapsed);
+      timeRef.current = remain;
+      setTime(remain);
+
+      // クリア判定（成功）
       setPower((p) => {
         if (!finishedRef.current && p >= 100) {
-          finish(true);
+          finish(true, { power: p, time: timeRef.current });
           return 100;
         }
         return p;
       });
 
-      // 残り時間（絶対時刻）
-      const startedAt = startAtRef.current ?? ts;
-      const elapsed = Math.max(0, (ts - startedAt) / 1000);
-      const remain = Math.max(0, DURATION - elapsed);
-      setTime(remain);
-
+      // タイムアップ（失敗）
       if (!finishedRef.current && remain <= 0) {
-        finish(false);   // ← フラグは finish() 内で立てる
-        return;          // 次フレームは要求しない
+        finish(false, { power: powerRef.current, time: 0 });
+        return;
       }
 
       if (runningRef.current && !finishedRef.current) requestAnimationFrame(onFrame);
@@ -246,16 +264,15 @@ export default function FireStart() {
   // キーボード
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!hasStarted) return;
+      if (!hasStarted || showHelp) return;
       if (e.code === "Space") { e.preventDefault(); spin(); }
       else if (e.code === "Enter") { e.preventDefault(); blow(); }
       else if (e.key.toLowerCase() === "r") { e.preventDefault(); retry(); }
+      else if (e.key === "?") { e.preventDefault(); setShowHelp(true); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [hasStarted, running, combo]);
-
-  useMemo(() => (power < 30 ? 0 : power < 60 ? 1 : power < 100 ? 2 : 3), [power]);
+  }, [hasStarted, running, combo, showHelp]);
 
   const flash = (text: string, ms = 600) => {
     setMessage(text);
@@ -297,7 +314,7 @@ export default function FireStart() {
     });
   };
 
-  // スコア送信（API → 失敗時ローカル）
+  // スコア送信
   async function submitScore(name: string, score: number) {
     const payload = { name: name.trim() || "Anonymous", score: Math.max(0, Math.round(score)) };
     try {
@@ -319,13 +336,18 @@ export default function FireStart() {
     }
   }
 
-  const finish = (success: boolean) => {
-    if (finishedRef.current) return; // 一度きり
+  // スナップショットで正確採点
+  const finish = (success: boolean, snap?: { power?: number; time?: number }) => {
+    if (finishedRef.current) return;
     finishedRef.current = true;
 
     setRunning(false);
 
-    const finalScore = Math.round(power * 10 + maxCombo * 25 + time * 20 + (success ? 500 : 0));
+    const p  = snap?.power ?? powerRef.current;
+    const t  = snap?.time  ?? timeRef.current;
+    const mc = maxComboRef.current;
+
+    const finalScore = Math.round(p * 10 + mc * 25 + t * 20 + (success ? 500 : 0));
     setResult({ score: finalScore, success });
 
     setBest((b) => {
@@ -345,53 +367,70 @@ export default function FireStart() {
     startAtRef.current = performance.now();
     setTime(DURATION); setPower(0); setHeat(0); setCombo(0); setMaxCombo(0);
     setResult(null); setMessage("スタート！");
-    setHasStarted(true); setRunning(true); lastTsRef.current = null;
+    setHasStarted(true); setShowHelp(false); setRunning(true); lastTsRef.current = null;
   };
 
   const retry = () => {
     finishedRef.current = false;
     startAtRef.current = performance.now();
-    setHasStarted(true); setRunning(true);
+    setHasStarted(true); setShowHelp(false); setRunning(true);
     setTime(DURATION); setPower(0); setHeat(0); setCombo(0); setMaxCombo(0);
     setResult(null); setMessage("再挑戦！"); lastTsRef.current = null;
   };
 
+  const canvasW = isMobile ? 260 : 360;
+  const canvasH = isMobile ? 300 : 360;
+
   return (
-    <div className="page-root">
+    <div className={`page-root ${isMobile ? "is-mobile" : ""}`}>
       <header className="site-header">
         <div className="site-header__inner">
           <Link href="/games" className="back-link" aria-label="ゲーム一覧に戻る">← ゲーム一覧へ</Link>
-          <h1 className="page-title">🔥 火起こしチャレンジ PLUS</h1>
+          <h1 className="page-title">🔥 火起こしチャレンジ</h1>
           <div className="spacer" />
+          <button
+            className="btn help"
+            onClick={() => setShowHelp(true)}
+            aria-label="ルールを開く"
+            title="ルール"
+          >
+            ?
+          </button>
         </div>
       </header>
 
-      <main className="game-container">
-        <div className="hud">
-          <div>残り時間: <strong>{Math.ceil(time)}</strong>s</div>
-          <div>コンボ: <strong>{combo}</strong>（Max {maxCombo}）</div>
-          <div className="wind-badge">風: {wind.toFixed(1)}</div>
+      <main className="game-container" style={{ paddingBottom: isMobile ? 92 : 24 }}>
+        {/* HUD */}
+        <div className="hud" style={{ gap: isMobile ? 8 : 16 }}>
+          <div>⏱ 残り: <strong>{Math.ceil(time)}</strong>s</div>
+          <div>🔗 コンボ: <strong>{combo}</strong>（Max {maxCombo}）</div>
+          <div className="wind-badge">🍃 風: {wind.toFixed(1)}</div>
         </div>
 
-        <div className="fire-area">
-          <CanvasFlame power={power} />
+        <div className="fire-area" style={{ display: "grid", placeItems: "center" }}>
+          <CanvasFlame power={power} width={canvasW} height={canvasH} />
         </div>
 
-        <Bars power={power} heat={heat} />
-        <TimingMeter value={meterPhaseRef.current} />
-
-        <div className="controls">
-          <button className="btn spin" onClick={spin} aria-label="回す（Space）">回す（Space）</button>
-          <button className="btn blow" onClick={blow} aria-label="送風（Enter）">送風（Enter）</button>
-          <button className="btn retry" onClick={retry} aria-label="リトライ（R）">リトライ（R）</button>
+        {/* バー＆メーター */}
+        <div style={{ maxWidth: isMobile ? 320 : 560, width: "100%", margin: "12px auto 0" }}>
+          <Bars power={power} heat={heat} />
+          <TimingMeter value={meterPhaseRef.current} />
         </div>
 
-        <p className="hint">
-          中央で「回す」を決めてコンボを伸ばし、熱をためてから「送風」で一気に火力へ！<br />
-          風が強いと火力が下がるのでテンポよく決めよう。
+        {/* PC操作 */}
+        {!isMobile && (
+          <div className="controls">
+            <button className="btn spin" onClick={spin} aria-label="回す（Space）">回す（Space）</button>
+            <button className="btn blow" onClick={blow} aria-label="送風（Enter）">送風（Enter）</button>
+            <button className="btn retry" onClick={retry} aria-label="リトライ（R）">リトライ（R）</button>
+          </div>
+        )}
+
+        <p className="hint" style={{ maxWidth: 560, marginInline: "auto" }}>
+          中央で「回す」を決めてコンボを伸ばし、Heat を貯めてから「送風」で Power に変換！ 風が強いと減衰するのでテンポ良く。
         </p>
 
-        <div className="message">{message}</div>
+        <div className="message" aria-live="polite">{message}</div>
 
         {result && (
           <div className="result-card">
@@ -405,42 +444,112 @@ export default function FireStart() {
         <Leaderboard refreshToken={lbRefresh} />
       </main>
 
-      {!hasStarted && (
-        <div className="overlay" style={{ overflowY: "auto" }}>
-          <div className="overlay-card">
-            <h2 className="overlay-title">🔥 火起こしチャレンジ PLUS</h2>
-            <p className="overlay-sub">制限時間 {DURATION} 秒以内に火力 100% を目指せ！</p>
+      {/* モバイル下部固定バー */}
+      {isMobile && hasStarted && !showHelp && (
+        <div
+          className="mobile-controls"
+          style={{
+            position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 40,
+            padding: "10px 12px calc(env(safe-area-inset-bottom, 0) + 10px)",
+            background: "rgba(255,255,255,.9)", backdropFilter: "saturate(1.2) blur(8px)",
+            borderTop: "1px solid #e5e7eb"
+          }}
+        >
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 8, maxWidth: 560, margin: "0 auto" }}>
+            <button className="btn spin" onClick={spin} style={{ fontSize: 18, padding: "12px 10px" }}>回す</button>
+            <button className="btn blow" onClick={blow} style={{ fontSize: 18, padding: "12px 10px" }}>送風</button>
+            <button className="btn retry" onClick={retry} aria-label="リトライ" style={{ padding: "12px 10px" }}>R</button>
+          </div>
+        </div>
+      )}
 
-            <label className="name-label">
+      {/* ルール・スタート オーバーレイ（初回＋ヘルプ） */}
+      {(!hasStarted || showHelp) && (
+        <div className="overlay" style={{ overflowY: "auto" }}>
+          <div className="overlay-card" style={{ maxWidth: 720 }}>
+            <h2 className="overlay-title">🔥 火起こしチャレンジ</h2>
+            <p className="overlay-sub">制限時間 {DURATION} 秒以内に <b>Power 100%</b> を目指そう！</p>
+
+            <div
+              className="rules"
+              style={{
+                display: "grid",
+                gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+                gap: 14,
+                textAlign: "left",
+                marginTop: 10
+              }}
+            >
+              <div className="rule-box" style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "#fff" }}>
+                <div style={{ fontWeight: 800, marginBottom: 6 }}>🎯 ルール</div>
+                <ul className="overlay-list" style={{ margin: 0 }}>
+                  <li><b>目標：</b>時間内に Power を 100% に到達させる</li>
+                  <li><b>減衰：</b>🍃風が強いと Power が少しずつ下がる</li>
+                  <li><b>スコア：</b>Power・残り時間・最大コンボ・成功ボーナス</li>
+                </ul>
+              </div>
+              <div className="rule-box" style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "#fff" }}>
+                <div style={{ fontWeight: 800, marginBottom: 6 }}>🕹 操作</div>
+                <ul className="overlay-list" style={{ margin: 0 }}>
+                  <li><b>回す（SPIN）：</b>動くカーソルがメーター中央に来た時に押すと <b>Heat↑</b>＋<b>コンボ加算</b></li>
+                  <li><b>送風（BLOW）：</b>貯めた Heat を <b>Power</b> に変換（コンボが高いほど効率UP）</li>
+                  <li className="muted">キーボード: <b>Space=回す</b> / <b>Enter=送風</b> / <b>R=リトライ</b> / <b>？=ヘルプ</b></li>
+                </ul>
+              </div>
+            </div>
+
+            {/* メーター凡例（視覚補助） */}
+            <div style={{ marginTop: 10 }}>
+              <div className="meter" style={{ maxWidth: 480, margin: "6px auto 0" }}>
+                <div className="meter-track" />
+                <div className="meter-band band-perfect" title="PERFECTゾーン" />
+                <div className="meter-band band-great" title="GREATゾーン" />
+                <div className="meter-band band-good" title="GOODゾーン" />
+                <div className="meter-cursor" style={{ left: "50%" }} />
+              </div>
+              <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4, textAlign: "center" }}>
+                中央（PERFECT）ほど Heat が大きく、コンボも続きやすい！
+              </div>
+            </div>
+
+            {/* 名前入力 */}
+            <label className="name-label" style={{ marginTop: 12 }}>
               プレイヤー名
               <input
                 className="name-input"
                 placeholder="例: Shiro"
                 value={playerName}
                 onChange={(e) => setPlayerName(e.target.value.slice(0, 40))}
+                inputMode="text"
               />
             </label>
 
-            <ul className="overlay-list">
-              <li><strong>Space</strong>：タイミング良く「回す」→ Heat 上昇＆コンボ加算</li>
-              <li><strong>Enter</strong>：送風→ Heat を Power に変換（高コンボほど効率UP）</li>
-              <li>風が強いと Power が下がるので、テンポよく PERFECT を狙おう！</li>
-            </ul>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr auto", gap: 10, alignItems: "center", marginTop: 10 }}>
+              <button
+                className="btn primary"
+                onClick={startGame}
+                disabled={!playerName.trim()}
+                title={!playerName.trim() ? "プレイヤー名を入力してください" : "開始"}
+                style={{ padding: "12px 16px", fontSize: 18 }}
+              >
+                ゲーム開始
+              </button>
+              {!isMobile && <div className="overlay-hint">※ Space/Enter/R でも操作できます</div>}
+            </div>
 
-            <button
-              className="btn primary"
-              onClick={startGame}
-              disabled={!playerName.trim()}
-              title={!playerName.trim() ? "プレイヤー名を入力してください" : "開始"}
-            >
-              ゲーム開始
-            </button>
-
-            <div style={{ marginTop: 12 }}>
+            <div style={{ marginTop: 14 }}>
               <Leaderboard refreshToken={lbRefresh} />
             </div>
 
-            <div className="overlay-hint">※ Space/Enter/R でも操作できます</div>
+            {hasStarted && (
+              <button
+                className="btn"
+                onClick={() => setShowHelp(false)}
+                style={{ marginTop: 10 }}
+              >
+                閉じてゲームに戻る
+              </button>
+            )}
           </div>
         </div>
       )}
