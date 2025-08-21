@@ -29,16 +29,9 @@ export default async function MeetingSheetPage() {
           <div className="min-w-0">
             <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">出席管理シート</h1>
             <p className="mt-2 text-sm md:text-base text-slate-600">
-              メイン（集計）シートと、各地区の詳細シートをExcelライクに編集できます。のちほどQR出席と連携します。
+              メイン（集計）シートと、各地区の詳細シートをExcelライクに編集できます。
             </p>
           </div>
-          <Link
-            href="/exec/meetings"
-            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Meetingsに戻る
-          </Link>
         </div>
 
         {/* 本体（完全クライアント）。グラフは SheetClient 側で dynamic import */}

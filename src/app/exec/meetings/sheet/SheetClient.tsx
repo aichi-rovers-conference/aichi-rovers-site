@@ -12,38 +12,14 @@ const REGIONS = [
   "豊田地区","三河葵地区","碧海地区","穂の国地区","その他地区",
 ] as const;
 
-const ResponsiveContainer = dynamic(
-  () => import("recharts").then(m => m.ResponsiveContainer),
-  { ssr: false }
-);
-const LineChart = dynamic(
-  () => import("recharts").then(m => m.LineChart),
-  { ssr: false }
-);
-const Line = dynamic(
-  () => import("recharts").then(m => m.Line),
-  { ssr: false }
-);
-const XAxis = dynamic(
-  () => import("recharts").then(m => m.XAxis),
-  { ssr: false }
-);
-const YAxis = dynamic(
-  () => import("recharts").then(m => m.YAxis),
-  { ssr: false }
-);
-const CartesianGrid = dynamic(
-  () => import("recharts").then(m => m.CartesianGrid),
-  { ssr: false }
-);
-const Tooltip = dynamic(
-  () => import("recharts").then(m => m.Tooltip),
-  { ssr: false }
-);
-const Brush = dynamic(
-  () => import("recharts").then(m => m.Brush),
-  { ssr: false }
-);
+const ResponsiveContainer = dynamic(() => import("recharts").then(m => m.ResponsiveContainer), { ssr: false });
+const LineChart = dynamic(() => import("recharts").then(m => m.LineChart), { ssr: false });
+const Line = dynamic(() => import("recharts").then(m => m.Line), { ssr: false });
+const XAxis = dynamic(() => import("recharts").then(m => m.XAxis), { ssr: false });
+const YAxis = dynamic(() => import("recharts").then(m => m.YAxis), { ssr: false });
+const CartesianGrid = dynamic(() => import("recharts").then(m => m.CartesianGrid), { ssr: false });
+const Tooltip = dynamic(() => import("recharts").then(m => m.Tooltip), { ssr: false });
+const Brush = dynamic(() => import("recharts").then(m => m.Brush), { ssr: false });
 
 type Region = typeof REGIONS[number];
 type MeetingLabel = string;
@@ -69,10 +45,11 @@ function parseMeetingLabel(lbl: MeetingLabel) {
   return { year: Number(m[1]), seq: Number(m[2]) };
 }
 
-/* ---- グラフ横幅: 会数×係数（スクロール用） ---- */
-function chartWidthPx(meetingsCount: number, denseCols: boolean) {
-  const per = denseCols ? 64 : 80;
-  return Math.max(720, meetingsCount * per);
+/* ---- グラフ横幅：少ない時は短く（最小320px）、増えると1件あたりの幅で伸びる ---- */
+function chartWidthPxAuto(meetingsCount: number, denseCols: boolean) {
+  const per = denseCols ? 56 : 72; // 1列あたりの幅（コンパクト/標準）
+  const min = 320;                 // データが少ない時の最小幅（SP/PC共通で短め）
+  return Math.max(min, meetingsCount * per);
 }
 
 /* ---- X軸のラベル傾き ---- */
@@ -83,12 +60,23 @@ function tickAngle(meetingsCount: number) {
   return 0;
 }
 
-/* ---- 表の colgroup を安全に生成（<colgroup> 内の空白ノード回避） ---- */
+/* ---- 表の colgroup（空白ノードなし） ---- */
+/* 合計列は「名古屋千種地区」に合わせてややコンパクトに（10.5rem） */
 function renderColsSummary(meetingsCount: number, denseCols: boolean) {
   const cols: ReactElement[] = [];
-  cols.push(<col key="label" style={{ width: "14rem" }} />);
+  cols.push(
+    <col
+      key="label"
+      style={{ width: denseCols ? "9.25rem" : "10.5rem" }}
+    />
+  );
   for (let i = 0; i < meetingsCount; i++) {
-    cols.push(<col key={`m-${i}`} style={{ width: denseCols ? "5.5rem" : "7rem" }} />);
+    cols.push(
+      <col
+        key={`m-${i}`}
+        style={{ width: denseCols ? "3.75rem" : "4.5rem" }}
+      />
+    );
   }
   return cols;
 }
@@ -100,7 +88,7 @@ function renderColsDetail(meetingsCount: number, denseCols: boolean) {
   cols.push(<col key="region" style={{ width: "14rem" }} />);
   cols.push(<col key="troop" style={{ width: "10rem" }} />);
   for (let i = 0; i < meetingsCount; i++) {
-    cols.push(<col key={`m-${i}`} style={{ width: denseCols ? "5.5rem" : "6.5rem" }} />);
+    cols.push(<col key={`m-${i}`} style={{ width: denseCols ? "4.25rem" : "5rem" }} />);
   }
   return cols;
 }
@@ -118,7 +106,7 @@ export default function MeetingSheetClient() {
   const [tab, setTab] = useState<"summary" | "detail">("summary");
   const [detailRegion, setDetailRegion] = useState<Region>("名古屋千種地区");
 
-  // 表示レンジコントロール
+  // 表示レンジ
   const [rangeMode, setRangeMode] = useState<"all" | "year" | "recent">("recent");
   const [denseCols, setDenseCols] = useState<boolean>(true);
   const years = useMemo(() => {
@@ -129,10 +117,8 @@ export default function MeetingSheetClient() {
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [recentCount, setRecentCount] = useState<number>(8);
 
-  // 直近保存のスナップショット（エラー時ロールバック用）
   const lastSavedRef = useRef<Map<string, { name: string; rsAge: string; region: Region; troop: string }>>(new Map());
 
-  // 初期ロード（Participants+Attendance の統合データ）
   useEffect(() => {
     (async () => {
       try {
@@ -155,20 +141,16 @@ export default function MeetingSheetClient() {
         }
         lastSavedRef.current = m;
 
-        // 初期年の妥当化
         if (meetingsArr.length) {
           const ys = new Set<number>();
           meetingsArr.forEach(lbl => { const p = parseMeetingLabel(lbl); if (!isNaN(p.year)) ys.add(p.year); });
           const sorted = Array.from(ys).sort((a, b) => a - b);
           setSelectedYear(sorted.length ? sorted[sorted.length - 1] : null);
         }
-      } catch {
-        // noop
-      }
+      } catch { /* noop */ }
     })();
   }, []);
 
-  // 年配列更新時に selectedYear の妥当化
   useEffect(() => {
     if (years.length === 0) { setSelectedYear(null); return; }
     if (selectedYear == null || !years.includes(selectedYear)) {
@@ -176,7 +158,6 @@ export default function MeetingSheetClient() {
     }
   }, [years, selectedYear]);
 
-  // 会の列を追加
   const addMeeting = async () => {
     try {
       const res = await fetch("/api/meetings/sheet", { method: "POST", cache: "no-store" });
@@ -193,12 +174,9 @@ export default function MeetingSheetClient() {
         });
         setMeetings(next);
       }
-    } catch {
-      // noop
-    }
+    } catch { /* noop */ }
   };
 
-  // 表示対象の列（フィルタ済み）を計算
   const visibleMeetings = useMemo(() => {
     if (meetings.length === 0) return [];
     if (rangeMode === "all") return meetings;
@@ -206,15 +184,14 @@ export default function MeetingSheetClient() {
       const n = Math.max(1, Math.min(recentCount, meetings.length));
       return meetings.slice(-n);
     }
-    // year
     const y = selectedYear ?? parseMeetingLabel(meetings[meetings.length - 1]).year;
     return meetings.filter(m => parseMeetingLabel(m).year === y);
   }, [meetings, rangeMode, recentCount, selectedYear]);
 
   return (
-    <div className="rounded-2xl bg-white ring-1 ring-slate-200 shadow-sm p-4 md:p-5">
-      {/* タブ & 右側アクション */}
-      <div className="flex flex-wrap items-center gap-2">
+    <>
+      {/* タブはカードの外に配置 */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         <button
           onClick={() => setTab("summary")}
           className={`rounded-lg px-3 py-1.5 text-sm font-semibold border ${
@@ -235,8 +212,12 @@ export default function MeetingSheetClient() {
         >
           地区詳細
         </button>
+      </div>
 
-        <div className="ml-auto flex items-center gap-2">
+      {/* カード内（薄い枠線つき） */}
+      <div className="rounded-2xl bg-white ring-1 ring-slate-200 shadow-sm p-4 md:p-5">
+        {/* 「標準/コンパクト」を左側に、追加は右側に */}
+        <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-1 rounded-lg border border-slate-300 bg-white pl-2 pr-1 py-1">
             <span className="text-xs text-slate-600">列幅</span>
             <button
@@ -259,79 +240,79 @@ export default function MeetingSheetClient() {
 
           <button
             onClick={addMeeting}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:opacity-95"
+            className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:opacity-95"
             title="次の定例会列を追加（R*-*）"
           >
             <Plus className="h-4 w-4" />
             列を追加
           </button>
         </div>
-      </div>
 
-      {/* 範囲フィルタ（共通） */}
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <div className="relative">
-          <select
-            value={rangeMode}
-            onChange={(e) => setRangeMode(e.target.value as any)}
-            className="appearance-none rounded-lg border border-slate-300 bg-white px-3 py-2 pr-8 text-sm font-medium shadow-sm focus:outline-none focus:ring-4 focus:ring-violet-100 focus:border-violet-500"
-            title="表示範囲"
-          >
-            <option value="recent">最近N回</option>
-            <option value="year">年別</option>
-            <option value="all">すべて</option>
-          </select>
-          <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-        </div>
-
-        {rangeMode === "recent" && (
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-slate-600">N =</label>
-            <input
-              type="number"
-              min={1}
-              max={Math.max(1, meetings.length)}
-              value={recentCount}
-              onChange={(e) => setRecentCount(Math.max(1, Math.min(Number(e.target.value) || 1, Math.max(1, meetings.length))))}
-              className="h-9 w-20 rounded-md border border-slate-300 px-2 text-sm outline-none focus:ring-4 focus:ring-violet-100 focus:border-violet-500"
-              title="最近N回を表示"
-            />
-          </div>
-        )}
-
-        {rangeMode === "year" && (
+        {/* 範囲フィルタ（共通） */}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
           <div className="relative">
             <select
-              value={selectedYear ?? ""}
-              onChange={(e) => setSelectedYear(Number(e.target.value))}
+              value={rangeMode}
+              onChange={(e) => setRangeMode(e.target.value as any)}
               className="appearance-none rounded-lg border border-slate-300 bg-white px-3 py-2 pr-8 text-sm font-medium shadow-sm focus:outline-none focus:ring-4 focus:ring-violet-100 focus:border-violet-500"
-              title="年を選択"
+              title="表示範囲"
             >
-              {years.map(y => <option key={y} value={y}>{`R${y}`}</option>)}
+              <option value="recent">最近N回</option>
+              <option value="year">年別</option>
+              <option value="all">すべて</option>
             </select>
             <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
           </div>
+
+          {rangeMode === "recent" && (
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-slate-600">N =</label>
+              <input
+                type="number"
+                min={1}
+                max={Math.max(1, meetings.length)}
+                value={recentCount}
+                onChange={(e) => setRecentCount(Math.max(1, Math.min(Number(e.target.value) || 1, Math.max(1, meetings.length))))}
+                className="h-9 w-20 rounded-md border border-slate-300 px-2 text-sm outline-none focus:ring-4 focus:ring-violet-100 focus:border-violet-500"
+                title="最近N回を表示"
+              />
+            </div>
+          )}
+
+          {rangeMode === "year" && (
+            <div className="relative">
+              <select
+                value={selectedYear ?? ""}
+                onChange={(e) => setSelectedYear(Number(e.target.value))}
+                className="appearance-none rounded-lg border border-slate-300 bg-white px-3 py-2 pr-8 text-sm font-medium shadow-sm focus:outline-none focus:ring-4 focus:ring-violet-100 focus:border-violet-500"
+                title="年を選択"
+              >
+                {years.map(y => <option key={y} value={y}>{`R${y}`}</option>)}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            </div>
+          )}
+
+          <span className="ml-auto text-xs text-slate-500">
+            表示中の列: <b>{visibleMeetings.length}</b> / 総列数: {meetings.length}
+          </span>
+        </div>
+
+        {tab === "summary" ? (
+          <SummarySheet meetings={visibleMeetings} people={people} denseCols={denseCols} />
+        ) : (
+          <DetailSheet
+            meetings={visibleMeetings}
+            people={people}
+            setPeople={setPeople}
+            detailRegion={detailRegion}
+            setDetailRegion={setDetailRegion}
+            lastSavedRef={lastSavedRef}
+            denseCols={denseCols}
+          />
         )}
-
-        <span className="ml-auto text-xs text-slate-500">
-          表示中の列: <b>{visibleMeetings.length}</b> / 総列数: {meetings.length}
-        </span>
       </div>
-
-      {tab === "summary" ? (
-        <SummarySheet meetings={visibleMeetings} people={people} denseCols={denseCols} />
-      ) : (
-        <DetailSheet
-          meetings={visibleMeetings}
-          people={people}
-          setPeople={setPeople}
-          detailRegion={detailRegion}
-          setDetailRegion={setDetailRegion}
-          lastSavedRef={lastSavedRef}
-          denseCols={denseCols}
-        />
-      )}
-    </div>
+    </>
   );
 }
 
@@ -364,13 +345,12 @@ function SummarySheet({
     return { regionCount, total, chartData };
   }, [people, meetings]);
 
-  const aCol = ["", "合計", ...REGIONS];
-  const width = chartWidthPx(meetings.length, denseCols);
+  const width = chartWidthPxAuto(meetings.length, denseCols);
   const angle = tickAngle(meetings.length);
 
   return (
     <div className="mt-4">
-      {/* 折れ線グラフ：合計（横スクロール＋Brush） */}
+      {/* 折れ線グラフ：少ない時は短く、増えるほど横に伸びる */}
       <div className="rounded-xl border border-slate-200 bg-white p-3">
         <div className="mb-2 flex items-end justify-between">
           <h3 className="text-sm font-semibold text-slate-800">合計参加者数の推移</h3>
@@ -378,7 +358,7 @@ function SummarySheet({
         </div>
         <div className="w-full overflow-x-auto">
           <div style={{ width }}>
-            <div className="h-[260px] w-full">
+            <div className="h-[220px] w-full">
               {meetings.length === 0 ? (
                 <div className="grid h-full place-items-center text-slate-500 text-sm">データがありません</div>
               ) : (
@@ -412,55 +392,63 @@ function SummarySheet({
         </div>
       </div>
 
-      {/* 表：横スクロール & 列幅可変 */}
-      <div className="mt-4 overflow-x-auto">
-        <table className="min-w-[760px] table-fixed border-separate border-spacing-0">
-          <colgroup>{renderColsSummary(meetings.length, denseCols)}</colgroup>
-          <thead>
-            <tr>
-              <th className="sticky left-0 top-0 z-20 bg-slate-50 border border-slate-200 px-3 py-2 text-left"></th>
-              {meetings.map(m => (
-                <th key={m} className="sticky top-0 z-10 bg-slate-50 border border-slate-200 px-3 py-2 text-left font-semibold">
-                  {m}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {aCol.slice(1).map((label, rowIdx) => {
-              const isTotal = rowIdx === 0;
-              return (
-                <tr key={label}>
+      {/* 表：スマホはフルブリードで横スワイプ、幅は colgroup 合計にフィット */}
+      <div className="mt-4 -mx-4 sm:mx-0">
+        <div className="overflow-x-auto overscroll-x-contain touch-pan-x">
+          <table className="table-auto w-auto whitespace-nowrap border-separate border-spacing-0 text-[12.5px] md:text-sm">
+            <colgroup>{renderColsSummary(meetings.length, denseCols)}</colgroup>
+            <thead>
+              <tr>
+                <th className="md:sticky md:left-0 top-0 z-20 bg-slate-50 border border-slate-200 px-2 py-2 text-left"></th>
+                {meetings.map((m) => (
                   <th
-                    className={`sticky left-0 z-10 bg-white border border-slate-200 px-3 py-2 text-left font-medium ${
-                      isTotal ? "bg-amber-50" : ""
-                    }`}
-                    scope="row"
+                    key={m}
+                    className="sticky top-0 z-10 bg-slate-50 border border-slate-200 px-2 py-2 text-left font-semibold"
                   >
-                    {label}
+                    {m}
                   </th>
-                  {meetings.map((m) => {
-                    const val = isTotal ? (total[m] || 0) : (regionCount[label as Region]?.[m] ?? 0);
-                    return (
-                      <td
-                        key={m}
-                        className={`border border-slate-200 px-3 py-2 text-right tabular-nums ${
-                          isTotal ? "bg-amber-50 font-semibold" : "bg-white"
-                        }`}
-                      >
-                        {val}
-                      </td>
-                    );
-                  })}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {["合計", ...REGIONS].map((label, rowIdx) => {
+                const isTotal = rowIdx === 0;
+                return (
+                  <tr key={label}>
+                    <th
+                      className={`md:sticky md:left-0 z-10 bg-white border border-slate-200 px-2 py-2 text-left font-medium ${
+                        isTotal ? "bg-amber-50" : ""
+                      }`}
+                      scope="row"
+                    >
+                      {label}
+                    </th>
 
-        <p className="mt-3 text-xs text-slate-500">
-          A列：1=空白, 2=合計, 3〜=各地区。表示範囲（上のコントロール）で列数を絞り込めます。
-        </p>
+                    {meetings.map((m) => {
+                      const val = isTotal
+                        ? (total[m] || 0)
+                        : (regionCount[label as Region]?.[m] ?? 0);
+                      return (
+                        <td
+                          key={m}
+                          className={`border border-slate-200 px-2 py-2 text-right tabular-nums ${
+                            isTotal ? "bg-amber-50 font-semibold" : "bg-white"
+                          }`}
+                        >
+                          {val}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {/* スクロール示唆（SP） */}
+        <div className="pointer-events-none relative h-0 sm:hidden">
+          <div className="absolute right-0 top-0 h-8 w-10 bg-gradient-to-l from-white to-transparent" />
+        </div>
       </div>
     </div>
   );
@@ -487,7 +475,6 @@ function DetailSheet({
   const rows = people[detailRegion];
   const [editEnabled, setEditEnabled] = useState(false);
 
-  // ✅ ブラウザ側での setTimeout 型は NodeJS.Timeout ではなく ReturnType<typeof setTimeout> が安全
   const autoLockTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const AUTO_LOCK_MS = 90_000;
 
@@ -506,15 +493,13 @@ function DetailSheet({
     }
   };
 
-  // グラフデータ
   const chartData = useMemo(
     () => meetings.map(m => ({ meeting: m, value: (rows ?? []).reduce((s, p) => s + (p.attendance?.[m] ? 1 : 0), 0) })),
     [meetings, rows]
   );
-  const width = chartWidthPx(meetings.length, denseCols);
+  const width = chartWidthPxAuto(meetings.length, denseCols);
   const angle = tickAngle(meetings.length);
 
-  // 出欠トグル
   const toggleAttend = async (i: number, m: MeetingLabel) => {
     if (!editEnabled) return;
     const before = rows[i].attendance[m];
@@ -541,7 +526,6 @@ function DetailSheet({
     }
   };
 
-  // 参加者フィールド保存
   async function patchParticipant(
     id: string,
     patch: Partial<{ name: string; rsAge: number | null; troop: string; district: Region }>
@@ -661,7 +645,7 @@ function DetailSheet({
         </button>
       </div>
 
-      {/* 地区別グラフ（横スクロール＋Brush） */}
+      {/* 地区別グラフ：少ない時は短く、増えるほど横に伸びる */}
       <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
         <div className="mb-2 flex items-end justify-between">
           <h3 className="text-sm font-semibold text-slate-800">{detailRegion} の参加者数の推移</h3>
@@ -669,7 +653,7 @@ function DetailSheet({
         </div>
         <div className="w-full overflow-x-auto">
           <div style={{ width }}>
-            <div className="h-[240px] w-full">
+            <div className="h-[220px] w-full">
               {meetings.length === 0 ? (
                 <div className="grid h-full place-items-center text-slate-500 text-sm">データがありません</div>
               ) : (
@@ -703,129 +687,136 @@ function DetailSheet({
         </div>
       </div>
 
-      {/* テーブル */}
-      <div className="mt-3 overflow-x-auto">
-        <table className="min-w-[900px] table-fixed border-separate border-spacing-0">
-          <colgroup>{renderColsDetail(meetings.length, denseCols)}</colgroup>
-          <thead>
-            <tr>
-              <th className="sticky left-0 top-0 z-20 bg-slate-50 border border-slate-200 px-3 py-2 text-left">氏名</th>
-              <th className="sticky top-0 z-10 bg-slate-50 border border-slate-200 px-3 py-2 text-left">RS年齢</th>
-              <th className="sticky top-0 z-10 bg-slate-50 border border-slate-200 px-3 py-2 text-left">所属地区</th>
-              <th className="sticky top-0 z-10 bg-slate-50 border border-slate-200 px-3 py-2 text-left">所属団</th>
-              {meetings.map(m => (
-                <th key={m} className="sticky top-0 z-10 bg-slate-50 border border-slate-200 px-3 py-2 text-left">{m}</th>
-              ))}
-            </tr>
-          </thead>
-
-          <tbody>
-            {rows.length === 0 && (
+      {/* テーブル：スマホはフルブリード横スワイプ / 「氏名の左固定」は md 以上だけ */}
+      <div className="mt-3 -mx-4 sm:mx-0">
+        <div className="overflow-x-auto overscroll-x-contain touch-pan-x">
+          <table className="min-w-[900px] table-fixed border-separate border-spacing-0 text-[13px] md:text-sm">
+            <colgroup>{renderColsDetail(meetings.length, denseCols)}</colgroup>
+            <thead>
               <tr>
-                <td className="border border-slate-200 px-3 py-3 text-slate-500 text-sm" colSpan={4 + meetings.length}>
-                  この地区の参加者はいません。
-                </td>
+                <th className="md:sticky md:left-0 top-0 z-20 bg-slate-50 border border-slate-200 px-3 py-2 text-left">氏名</th>
+                <th className="sticky top-0 z-10 bg-slate-50 border border-slate-200 px-3 py-2 text-left">RS年齢</th>
+                <th className="sticky top-0 z-10 bg-slate-50 border border-slate-200 px-3 py-2 text-left">所属地区</th>
+                <th className="sticky top-0 z-10 bg-slate-50 border border-slate-200 px-3 py-2 text-left">所属団</th>
+                {meetings.map(m => (
+                  <th key={m} className="sticky top-0 z-10 bg-slate-50 border border-slate-200 px-3 py-2 text-left">{m}</th>
+                ))}
               </tr>
-            )}
+            </thead>
 
-            {rows.map((p, i) => (
-              <tr key={p.id}>
-                {/* 氏名 */}
-                <td className="sticky left-0 z-10 bg-white border border-slate-200 px-2 py-1.5">
-                  {editEnabled ? (
-                    <input
-                      className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm outline-none focus:ring-4 focus:ring-violet-100 focus:border-violet-500"
-                      value={p.name}
-                      onChange={(e) => onTextChange(i, "name", e.target.value)}
-                      onBlur={() => onTextBlur(i, "name")}
-                      placeholder="氏名"
-                    />
-                  ) : (
-                    <div className="px-1 py-1 text-sm">{p.name || <span className="text-slate-400">—</span>}</div>
-                  )}
-                </td>
+            <tbody>
+              {rows.length === 0 && (
+                <tr>
+                  <td className="border border-slate-200 px-3 py-3 text-slate-500 text-sm" colSpan={4 + meetings.length}>
+                    この地区の参加者はいません。
+                  </td>
+                </tr>
+              )}
 
-                {/* RS年齢 */}
-                <td className="border border-slate-200 px-2 py-1.5">
-                  {editEnabled ? (
-                    <input
-                      inputMode="numeric"
-                      className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm outline-none focus:ring-4 focus:ring-violet-100 focus:border-violet-500"
-                      value={p.rsAge}
-                      onChange={(e) => onTextChange(i, "rsAge", e.target.value)}
-                      onBlur={() => onTextBlur(i, "rsAge")}
-                      placeholder="例: 1"
-                    />
-                  ) : (
-                    <div className="px-1 py-1 text-sm">{p.rsAge || <span className="text-slate-400">—</span>}</div>
-                  )}
-                </td>
+              {rows.map((p, i) => (
+                <tr key={p.id} className="whitespace-nowrap">
+                  {/* 氏名：スマホでは sticky 無効 */}
+                  <td className="md:sticky md:left-0 z-10 bg-white border border-slate-200 px-2 py-1.5">
+                    {editEnabled ? (
+                      <input
+                        className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm outline-none focus:ring-4 focus:ring-violet-100 focus:border-violet-500"
+                        value={p.name}
+                        onChange={(e) => onTextChange(i, "name", e.target.value)}
+                        onBlur={() => onTextBlur(i, "name")}
+                        placeholder="氏名"
+                      />
+                    ) : (
+                      <div className="px-1 py-1 text-sm">{p.name || <span className="text-slate-400">—</span>}</div>
+                    )}
+                  </td>
 
-                {/* 所属地区 */}
-                <td className="border border-slate-200 px-2 py-1.5">
-                  {editEnabled ? (
-                    <div className="relative">
-                      <select
-                        value={p.region}
-                        onChange={(e) => onRegionSelect(i, e.target.value as Region)}
-                        className="w-full appearance-none rounded-md border border-slate-300 bg-white px-2 py-1 pr-8 text-sm outline-none focus:ring-4 focus:ring-violet-100 focus:border-violet-500"
-                        title="所属地区"
-                      >
-                        {REGIONS.map(r => <option key={r} value={r}>{r}</option>)}
-                      </select>
-                      <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                    </div>
-                  ) : (
-                    <div className="px-1 py-1 text-sm">{p.region}</div>
-                  )}
-                </td>
+                  {/* RS年齢 */}
+                  <td className="border border-slate-200 px-2 py-1.5 text-center">
+                    {editEnabled ? (
+                      <input
+                        inputMode="numeric"
+                        className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm outline-none focus:ring-4 focus:ring-violet-100 focus:border-violet-500 text-center"
+                        value={p.rsAge}
+                        onChange={(e) => onTextChange(i, "rsAge", e.target.value)}
+                        onBlur={() => onTextBlur(i, "rsAge")}
+                        placeholder="例: 1"
+                      />
+                    ) : (
+                      <div className="px-1 py-1 text-sm">{p.rsAge || <span className="text-slate-400">—</span>}</div>
+                    )}
+                  </td>
 
-                {/* 所属団 */}
-                <td className="border border-slate-200 px-2 py-1.5">
-                  {editEnabled ? (
-                    <input
-                      className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm outline-none focus:ring-4 focus:ring-violet-100 focus:border-violet-500"
-                      value={p.troop}
-                      onChange={(e) => onTextChange(i, "troop", e.target.value)}
-                      onBlur={() => onTextBlur(i, "troop")}
-                      placeholder="所属団"
-                    />
-                  ) : (
-                    <div className="px-1 py-1 text-sm">{p.troop || <span className="text-slate-400">—</span>}</div>
-                  )}
-                </td>
+                  {/* 所属地区 */}
+                  <td className="border border-slate-200 px-2 py-1.5">
+                    {editEnabled ? (
+                      <div className="relative">
+                        <select
+                          value={p.region}
+                          onChange={(e) => onRegionSelect(i, e.target.value as Region)}
+                          className="w-full appearance-none rounded-md border border-slate-300 bg-white px-2 py-1 pr-8 text-sm outline-none focus:ring-4 focus:ring-violet-100 focus:border-violet-500"
+                          title="所属地区"
+                        >
+                          {REGIONS.map(r => <option key={r} value={r}>{r}</option>)}
+                        </select>
+                        <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                      </div>
+                    ) : (
+                      <div className="px-1 py-1 text-sm">{p.region}</div>
+                    )}
+                  </td>
 
-                {/* 出欠列 */}
-                {meetings.map(m => {
-                  const checked = !!p.attendance[m];
-                  return (
-                    <td key={m} className="border border-slate-200 px-2 py-1.5">
-                      <button
-                        type="button"
-                        onClick={() => toggleAttend(i, m)}
-                        disabled={!editEnabled}
-                        className={`mx-auto flex h-7 w-7 items-center justify-center rounded-full border text-sm transition ${
-                          checked
-                            ? "border-emerald-500 bg-emerald-50 text-emerald-700"
-                            : "border-slate-300 bg-white text-slate-400"
-                        } ${!editEnabled ? "opacity-60 cursor-not-allowed" : "hover:bg-slate-50"}`}
-                        aria-pressed={checked}
-                        aria-label={checked ? `${m} 出席 〇` : `${m} 未出席`}
-                        title={
-                          !editEnabled
-                            ? "ロック中です。「編集を有効化」を押すと変更できます。"
-                            : checked ? "出席（クリックで解除）" : "未出席（クリックで 〇）"
-                        }
-                      >
-                        {checked ? "〇" : ""}
-                      </button>
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                  {/* 所属団 */}
+                  <td className="border border-slate-200 px-2 py-1.5">
+                    {editEnabled ? (
+                      <input
+                        className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm outline-none focus:ring-4 focus:ring-violet-100 focus:border-violet-500"
+                        value={p.troop}
+                        onChange={(e) => onTextChange(i, "troop", e.target.value)}
+                        onBlur={() => onTextBlur(i, "troop")}
+                        placeholder="所属団"
+                      />
+                    ) : (
+                      <div className="px-1 py-1 text-sm">{p.troop || <span className="text-slate-400">—</span>}</div>
+                    )}
+                  </td>
+
+                  {/* 出欠列 */}
+                  {meetings.map(m => {
+                    const checked = !!p.attendance[m];
+                    return (
+                      <td key={m} className="border border-slate-200 px-2 py-1.5">
+                        <button
+                          type="button"
+                          onClick={() => toggleAttend(i, m)}
+                          disabled={!editEnabled}
+                          className={`mx-auto flex h-7 w-7 items-center justify-center rounded-full border text-sm transition ${
+                            checked
+                              ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                              : "border-slate-300 bg-white text-slate-400"
+                          } ${!editEnabled ? "opacity-60 cursor-not-allowed" : "hover:bg-slate-50"}`}
+                          aria-pressed={checked}
+                          aria-label={checked ? `${m} 出席 〇` : `${m} 未出席`}
+                          title={
+                            !editEnabled
+                              ? "ロック中です。「編集を有効化」を押すと変更できます。"
+                              : checked ? "出席（クリックで解除）" : "未出席（クリックで 〇）"
+                          }
+                        >
+                          {checked ? "〇" : ""}
+                        </button>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* スクロール示唆グラデ（SPのみ） */}
+        <div className="pointer-events-none relative h-0 sm:hidden">
+          <div className="absolute right-0 top-0 h-8 w-10 bg-gradient-to-l from-white to透明" />
+        </div>
 
         <p className="mt-3 text-xs text-slate-500">
           表示範囲・列幅は上のコントロールで調整できます。編集モード中のみ変更可能です。
