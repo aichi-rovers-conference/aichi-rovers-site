@@ -1,7 +1,8 @@
 // components/ExecAccessButton.tsx
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Shield, X } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -21,7 +22,6 @@ export default function ExecAccessButton({
   const [session, setSession] = useState<{ username: string } | null>(null);
   const router = useRouter();
 
-  // 起動時にセッション確認（機能は変更なし）
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -46,8 +46,8 @@ export default function ExecAccessButton({
     "fixed right-4 bottom-4 z-40 rounded-full bg-red-700 text-white px-4 h-12 shadow-md hover:bg-red-600";
 
   const onClick = () => {
-    if (session) router.push("/exec"); // ログイン済 → 即ダッシュボードへ
-    else setOpen(true); // 未ログイン → モーダル表示
+    if (session) router.push("/exec");
+    else setOpen(true);
   };
 
   return (
@@ -74,19 +74,26 @@ export default function ExecAccessButton({
         </button>
       )}
 
-      {/* デザインのみ刷新（機能は維持） */}
       <AnimatePresence>
         {!session && open && (
-          <LoginModal
-            onClose={() => setOpen(false)}
-          />
+          <BodyPortal>
+            <LoginModal onClose={() => setOpen(false)} />
+          </BodyPortal>
         )}
       </AnimatePresence>
     </>
   );
 }
 
-/* ----------------------- Modal（デザイン刷新） ----------------------- */
+/* -------- Portal：body直下に描画 -------- */
+function BodyPortal({ children }: { children: ReactNode }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) return null;
+  return createPortal(children, document.body);
+}
+
+/* ----------------------- Modal（SP=横幅フル / PC=従来） ----------------------- */
 function LoginModal({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   const [username, setUsername] = useState("");
@@ -94,8 +101,8 @@ function LoginModal({ onClose }: { onClose: () => void }) {
   const [remember, setRemember] = useState(true);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
+  const userRef = useRef<HTMLInputElement>(null);
 
-  // Enter で送信（機能追加ではなくUX改善）
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
       if (e.key === "Enter" && username && password && !loading) {
@@ -105,6 +112,16 @@ function LoginModal({ onClose }: { onClose: () => void }) {
     [username, password, loading]
   );
 
+  useEffect(() => {
+    const original = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const t = requestAnimationFrame(() => userRef.current?.focus());
+    return () => {
+      cancelAnimationFrame(t);
+      document.body.style.overflow = original;
+    };
+  }, []);
+
   async function submit() {
     setLoading(true);
     setErr("");
@@ -112,7 +129,6 @@ function LoginModal({ onClose }: { onClose: () => void }) {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // 既存仕様を維持（username と id を同値で送る）
         body: JSON.stringify({ username, id: username, password, remember }),
       });
       if (!res.ok) {
@@ -129,9 +145,9 @@ function LoginModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    // 画面全体を覆う・中央寄せ（小画面でも必ず中央）
+    // 画面中央・最前面。SPは余白なし（p-0）で横幅フル、PCはp-4で中央に余白
     <motion.div
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+      className="fixed inset-0 z-[99999] flex items-center justify-center p-0 sm:p-4"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -140,30 +156,33 @@ function LoginModal({ onClose }: { onClose: () => void }) {
       aria-labelledby="exec-login-title"
       onKeyDown={handleKeyDown}
     >
-      {/* オーバーレイ：半透明＋軽いぼかし */}
+      {/* 背景オーバーレイ */}
       <motion.div
-        className="absolute inset-0 bg-black/40 backdrop-blur-[1.5px]"
+        className="absolute inset-0 bg-black/45 backdrop-blur-sm"
         onClick={onClose}
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
       />
 
-      {/* モーダル本体：幅/高さともにモバイル対応、はみ出し回避 */}
+      {/* モーダル本体：SPは横幅フル（100svw）、PCは max-w-md */}
       <motion.div
-        initial={{ opacity: 0, y: 16, scale: 0.98 }}
+        initial={{ opacity: 0, y: 8, scale: 0.99 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: 16, scale: 0.98 }}
+        exit={{ opacity: 0, y: 8, scale: 0.99 }}
         transition={{ type: "spring", stiffness: 260, damping: 22 }}
         className="
-          relative z-[101] w-full max-w-md
-          rounded-2xl bg-white shadow-xl
-          ring-1 ring-slate-200
+          relative z-[100000]
+          w-[100svw] max-w-none sm:w-full sm:max-w-md
+          rounded-none sm:rounded-2xl
+          bg-white
+          shadow-none sm:shadow-xl
+          ring-0 sm:ring-1 sm:ring-slate-200
           p-5 sm:p-6
-          max-h-[85vh] overflow-auto
+          max-h-[100svh] sm:max-h-[90svh] overflow-auto
         "
       >
-        {/* 閉じるボタン（右上固定） */}
+        {/* 閉じる */}
         <button
           onClick={onClose}
           aria-label="閉じる"
@@ -173,11 +192,8 @@ function LoginModal({ onClose }: { onClose: () => void }) {
         </button>
 
         {/* ヘッダー */}
-        <div className="mb-4">
-          <h2
-            id="exec-login-title"
-            className="text-lg sm:text-xl font-bold text-slate-900"
-          >
+        <div className="mb-3">
+          <h2 id="exec-login-title" className="text-lg sm:text-xl font-bold text-slate-900">
             運営委員ログイン
           </h2>
           <p className="mt-1 text-sm text-slate-600">
@@ -192,6 +208,8 @@ function LoginModal({ onClose }: { onClose: () => void }) {
           </label>
           <input
             id="exec-username"
+            ref={userRef}
+            autoFocus
             placeholder="ID（アンケートと同じ）"
             className="h-11 rounded-xl border border-gray-300 px-3 outline-none shadow-sm focus:ring-4 focus:ring-red-100 focus:border-red-600 transition"
             value={username}
