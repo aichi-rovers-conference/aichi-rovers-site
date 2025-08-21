@@ -14,6 +14,14 @@ const DISTRICTS = [
   "知多西南地区","豊田地区","三河葵地区","碧海地区","穂の国地区","その他地区",
 ] as const;
 
+const COLS = [
+  "w-[220px]", // 氏名
+  "w-[240px]", // 所属団
+  "w-[100px]", // RS年齢
+  "w-[240px]", // 地区
+  "w-[200px]", // 操作
+] as const;
+
 type Participant = {
   id: string;
   name: string;
@@ -123,7 +131,7 @@ export default function ManageParticipantsPage() {
         </div>
       </div>
 
-      {/* List */}
+      {/* List（スマホは横スクロールで1行横並びを維持） */}
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
@@ -139,44 +147,66 @@ export default function ManageParticipantsPage() {
         ) : list.length === 0 ? (
           <div className="p-8 text-center text-gray-500">該当がありません</div>
         ) : (
-          <div className="overflow-auto">
-            <table className="min-w-full text-sm">
-              <thead className="sticky top-0 bg-gray-50">
-                <tr className="text-gray-600">
-                  <th className="text-left font-semibold px-5 py-3">氏名</th>
-                  <th className="text-left font-semibold px-5 py-3">所属団</th>
-                  <th className="text-center font-semibold px-5 py-3">RS年齢</th>
-                  <th className="text-left font-semibold px-5 py-3">地区</th>
-                  <th className="text-left font-semibold px-5 py-3">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {list.map((p, i) => (
-                  <tr key={p.id} className={i % 2 ? "bg-white" : "bg-gray-50/60"}>
-                    <td className="px-5 py-3">{p.name}</td>
-                    <td className="px-5 py-3">{p.troop}</td>
-                    <td className="px-5 py-3 text-center">{p.rsAge}</td>
-                    <td className="px-5 py-3">{p.district}</td>
-                    <td className="px-5 py-3">
-                      <div className="flex items-center gap-2">
-                        <Link
-                          href={`/exec/participants/manage/${p.id}`}
-                          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs hover:bg-slate-50"
-                        >
-                          詳細 / 編集
-                        </Link>
-                        <DeleteButton
+          // フルブリードでスワイプしやすく（モバイル時）
+          <div className="-mx-4 sm:mx-0">
+            <div className="overflow-x-auto overscroll-x-contain touch-pan-x">
+              <table className="min-w-[860px] w-max text-sm table-fixed">
+                {/* 列幅を固定して横並びを維持（行内で改行させない） */}
+                <colgroup>{COLS.map((cls, i) => <col key={i} className={cls} />)}</colgroup>
+
+
+                <thead className="sticky top-0 bg-gray-50 z-10">
+                  <tr className="text-gray-600">
+                    <th className="text-left font-semibold pl-6 pr-5 py-3 whitespace-nowrap">氏名</th>
+                    <th className="text-left font-semibold px-5 py-3 whitespace-nowrap">所属団</th>
+                    <th className="text-center font-semibold px-5 py-3 whitespace-nowrap">RS年齢</th>
+                    <th className="text-left font-semibold px-5 py-3 whitespace-nowrap">地区</th>
+                    <th className="text-left font-semibold px-5 py-3 whitespace-nowrap">操作</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {list.map((p, i) => (
+                    <tr
+                      key={p.id}
+                      className={`whitespace-nowrap ${i % 2 ? "bg-white" : "bg-gray-50/60"}`}
+                    >
+                      <td className="pl-6 pr-5 py-3">
+                        <div className="max-w-[200px] truncate">{p.name}</div>
+                      </td>
+                      <td className="px-5 py-3">
+                        <div className="max-w-[220px] truncate">{p.troop}</div>
+                      </td>
+                      <td className="px-5 py-3 text-center">{p.rsAge}</td>
+                      <td className="px-5 py-3">
+                        <div className="max-w-[220px] truncate">{p.district}</div>
+                      </td>
+                      <td className="px-5 py-3">
+                        <div className="flex items-center gap-2">
+                          <Link
+                            href={`/exec/participants/manage/${p.id}`}
+                            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs hover:bg-slate-50"
+                          >
+                            詳細 / 編集
+                          </Link>
+                          <DeleteButton
                             id={p.id}
                             onDeleted={(id) => {
-                                setList((prev) => prev.filter((x) => x.id !== id));
+                              setList((prev) => prev.filter((x) => x.id !== id));
                             }}
-                        />
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                          />
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* スクロールを示す薄いグラデ（任意） */}
+            <div className="pointer-events-none relative h-0">
+              <div className="absolute right-0 top-0 h-8 w-8 bg-gradient-to-l from-white to-transparent sm:hidden" />
+            </div>
           </div>
         )}
       </motion.div>
