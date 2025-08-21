@@ -8,16 +8,21 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-    const username = String(body?.id ?? body?.username ?? "").trim();
+
+    // 入力の正規化
+    const rawUser = String(body?.id ?? body?.username ?? "");
+    const usernameNorm = rawUser.trim();
     const password = String(body?.password ?? "").trim();
     const remember = Boolean(body?.remember);
 
-    if (!username || !password) {
-      return NextResponse.json({ ok: false, error: "missing" }, { status: 400 });
+    // 簡易バリデーション
+    if (!usernameNorm || !password || usernameNorm.length > 64 || password.length > 200) {
+      return jsonNoStore({ ok: false, error: "missing" }, 400);
     }
 
-    const user = await prisma.user.findUnique({
-      where: { username },
+    // ★ 大文字小文字を無視して検索（findUniqueは厳密一致のみのためfindFirstを使う）
+    const user = await prisma.user.findFirst({
+      where: { username: { equals: usernameNorm, mode: "insensitive" } },
       select: {
         id: true,
         username: true,
@@ -29,12 +34,12 @@ export async function POST(req: Request) {
     });
 
     if (!user || !user.isActive) {
-      return NextResponse.json({ ok: false, error: "invalid" }, { status: 401 });
+      return jsonNoStore({ ok: false, error: "invalid" }, 401);
     }
 
     const ok = await verifyPassword(password, user.passwordHash);
     if (!ok) {
-      return NextResponse.json({ ok: false, error: "invalid" }, { status: 401 });
+      return jsonNoStore({ ok: false, error: "invalid" }, 401);
     }
 
     const payload = {
@@ -47,8 +52,10 @@ export async function POST(req: Request) {
 
     // remember: true => 30日 / false => 8時間
     const token = await signSession(payload, remember ? "30d" : "8h");
+    const maxAge = remember ? 60 * 60 * 24 * 30 : 60 * 60 * 8;
 
-    const res = NextResponse.json({
+    // レスポンス本体
+    const res = jsonNoStore({
       ok: true,
       user: {
         id: user.id,
@@ -60,29 +67,39 @@ export async function POST(req: Request) {
       remember,
     });
 
-    // 本番は常に secure、sameSite=Lax、path=/。必要に応じて domain を設定
+    // Cookie 発行（domain は条件付きで付与）
     const isProd = process.env.NODE_ENV === "production";
+    const CANONICAL_HOST = process.env.CANONICAL_HOST ?? "aichirovers.com";
+    const cookieDomain = process.env.COOKIE_DOMAIN ?? `.${CANONICAL_HOST}`;
+
+    const host = (req.headers.get("host") || "").toLowerCase();
+    const shouldSetDomain =
+      isProd && !!host && (host === CANONICAL_HOST || host === `www.${CANONICAL_HOST}` || host.endsWith(`.${CANONICAL_HOST}`));
+
     const cookieOpts: Parameters<typeof res.cookies.set>[2] = {
       httpOnly: true,
       secure: isProd,
       sameSite: "lax",
       path: "/",
-      maxAge: remember ? 60 * 60 * 24 * 30 : 60 * 60 * 8,
-      // domain: ".example.com", // ルート/サブドメイン共有が必要なら指定
+      maxAge,
+      ...(shouldSetDomain ? { domain: cookieDomain } : {}), // ← 条件付き
     };
 
     res.cookies.set(COOKIE_NAME, token, cookieOpts);
 
-    // レガシーCookie掃除（存在していれば削除）
+    // レガシーCookie掃除
     for (const legacy of ["admin", "admin_id", "admin_role", "session"]) {
-      res.cookies.set(legacy, "", { path: "/", maxAge: 0 });
+      res.cookies.set(legacy, "", { path: "/", maxAge: 0, ...(shouldSetDomain ? { domain: cookieDomain } : {}) });
     }
 
     return res;
   } catch (e: any) {
-    return NextResponse.json(
-      { ok: false, error: "server", message: e?.message || String(e) },
-      { status: 500 }
-    );
+    return jsonNoStore({ ok: false, error: "server", message: e?.message || String(e) }, 500);
   }
+}
+
+function jsonNoStore(body: any, status = 200) {
+  const res = NextResponse.json(body, { status });
+  res.headers.set("Cache-Control", "no-store, max-age=0");
+  return res;
 }

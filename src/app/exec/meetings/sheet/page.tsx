@@ -21,6 +21,7 @@ export default async function MeetingSheetPage() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-white to-slate-50">
       {/* ヘッダー（クライアント） */}
+      <div className="h-2 w-full bg-gradient-to-r from-violet-400 via-fuchsia-400 to-indigo-400" />
       <ArcHeader />
 
       <main className="mx-auto max-w-7xl px-4 md:px-8 py-8">

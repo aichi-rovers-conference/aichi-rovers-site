@@ -1,43 +1,47 @@
 // app/api/auth/session/route.ts
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { jwtVerify } from "jose";
 
 const COOKIE_NAME = "arc_session";
 const SECRET = new TextEncoder().encode(process.env.AUTH_SECRET || "dev-secret");
 
-function getCookie(req: Request, name: string): string | null {
-  const raw = req.headers.get("cookie");
-  if (!raw) return null;
-  // name=... の最初の一致を安全に抜き出す
-  const m = raw.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
-  if (!m) return null;
+// ★ middleware と必ず合わせる
+const ISS = process.env.AUTH_ISSUER ?? "https://aichirovers.com";
+const AUD = process.env.AUTH_AUDIENCE ?? "arc-web";
+
+export async function GET() {
   try {
-    return decodeURIComponent(m[1]);
+    // cookies() を使うとエッジ/Node両方で安全
+    const jar = await cookies();
+    const token = jar.get(COOKIE_NAME)?.value;
+    if (!token) return no(); // ← 200で {ok:false} を返す実装
+
+    const { payload } = await jwtVerify(token, SECRET, {
+      issuer: ISS,
+      audience: AUD,
+      clockTolerance: "60s",
+    });
+
+    return yes({
+      id: payload.id,
+      username: payload.username,
+      role: payload.role,
+      remember: payload.remember,
+    });
   } catch {
-    return m[1]; // デコード失敗時は生値
+    return no();
   }
 }
 
-export async function GET(req: Request) {
-  try {
-    const token = getCookie(req, COOKIE_NAME);
-    if (!token) return NextResponse.json({ ok: false }, { status: 401 });
-
-    const { payload } = await jwtVerify(token, SECRET);
-
-    return NextResponse.json(
-      {
-        ok: true,
-        user: {
-          id: payload.id,
-          username: payload.username,
-          role: payload.role,
-          remember: payload.remember,
-        },
-      },
-      { headers: { "Cache-Control": "no-store, must-revalidate" } }
-    );
-  } catch {
-    return NextResponse.json({ ok: false }, { status: 401 });
-  }
+function yes(user: any) {
+  const res = NextResponse.json({ ok: true, user });
+  res.headers.set("Cache-Control", "no-store, max-age=0");
+  return res;
+}
+function no() {
+  // 失敗時も 200 で {ok:false} を返すと、フロント側の fetch で res.ok 分岐に左右されにくい
+  const res = NextResponse.json({ ok: false });
+  res.headers.set("Cache-Control", "no-store, max-age=0");
+  return res;
 }

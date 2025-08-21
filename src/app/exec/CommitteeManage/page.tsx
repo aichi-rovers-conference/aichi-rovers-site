@@ -507,14 +507,14 @@ function ActionCell({
       <div className="relative md:hidden">
         <button
           ref={btnRef}
-          className={ghost}
+          className={`${ghost} inline-flex flex-row items-center gap-1 whitespace-nowrap [writing-mode:horizontal-tb] [text-orientation:mixed]`}
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
           aria-haspopup="menu"
           type="button"
         >
-          <MoreVertical className="h-4 w-4" />
-          操作
+          <MoreVertical className="h-4 w-4 shrink-0" />
+          <span className="leading-none whitespace-nowrap [writing-mode:horizontal-tb] [text-orientation:mixed]">操作</span>
         </button>
 
         {mounted && open && createPortal(
