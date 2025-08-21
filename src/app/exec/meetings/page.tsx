@@ -79,14 +79,6 @@ export default async function MeetingPage() {
               定例会に関する「QR出席管理」「出席管理シート」「QRメール一斉送信」「アーカイブ作成」へ素早くアクセスします。
             </p>
           </div>
-          <Link
-            href="/exec"
-            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-            title="運営ダッシュボードに戻る"
-          >
-            <ArrowLeft className="size-4" />
-            戻る
-          </Link>
         </div>
 
         {/* クイックリンク */}

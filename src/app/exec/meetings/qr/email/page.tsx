@@ -39,13 +39,6 @@ export default async function QREmailPage() {
               <code className="rounded bg-slate-100 px-1 py-0.5">{"{{qr_url}}"}</code> が使えます。
             </p>
           </div>
-          <Link
-            href="/exec/meeting"
-            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-          >
-            <ArrowLeft className="size-4" />
-            Meetingsへ戻る
-          </Link>
         </div>
 
         {/* 本体 */}

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import ArcHeader1 from "@/components/ArcHeader1";
 
 /* 令和FYの最新Rを計算（FYは4月開始） */
 function latestReiwaFY(): number {
@@ -248,7 +249,6 @@ export default function ArchiveBuilderClient() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-white to-slate-50">
-      <div className="h-2 w-full bg-gradient-to-r from-violet-400 via-fuchsia-400 to-indigo-400" />
       <div className="mx-auto max-w-5xl px-4 md:px-8 py-8">
         <header className="mb-6 flex flex-wrap items-end gap-4">
           <div>

@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import ArcHeader from "@/components/ArcHeader";
 import Link from "next/link";
-import QRListClient from "./qr-list-client"; 
+import QRListClient from "./qr-list-client";
 import { verifyToken, COOKIE_NAME } from "@/lib/auth";
 
 export default async function QRPage() {
@@ -17,9 +17,12 @@ export default async function QRPage() {
       <div className="h-2 w-full bg-gradient-to-r from-violet-400 via-fuchsia-400 to-indigo-400" />
       <ArcHeader />
       <main className="mx-auto max-w-7xl px-4 md:px-8 py-8">
+        {/* ヘッダー行：PCではタイトル左・ボタン右、スマホではタイトルのみ */}
         <div className="flex items-center justify-between gap-3">
           <h1 className="text-2xl font-extrabold tracking-tight">QR リスト（配布用）</h1>
-          <div className="flex items-center gap-2">
+
+          {/* PC/タブレット用ボタン（md以上で表示） */}
+          <div className="hidden md:flex items-center gap-2">
             <Link
               href="/exec/meetings/qr/email"
               className="rounded-xl border border-slate-300 bg-white px-4 py-2 font-semibold hover:bg-slate-50"
@@ -35,9 +38,21 @@ export default async function QRPage() {
             </Link>
           </div>
         </div>
+
+        {/* 説明文（スマホ・PC共通） */}
         <p className="mt-2 text-sm text-slate-600">
           定例会を選び、各参加者のQRコードを印刷・配布できます。メールで配る場合は「メール一斉送信へ」からどうぞ。
         </p>
+
+        {/* スマホ用ボタン：説明文の下に配置（md未満で表示） */}
+        <div className="mt-4 flex flex-col sm:flex-row gap-2 md:hidden">
+          <Link
+            href="/exec/meetings/qr/scan"
+            className="rounded-xl bg-gray-900 text-white px-4 py-2 font-semibold text-center shadow hover:bg-black"
+          >
+            読み取りページへ
+          </Link>
+        </div>
 
         <section className="mt-6">
           <QRListClient />
