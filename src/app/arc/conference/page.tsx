@@ -1,3 +1,4 @@
+// app/arc/conference/page.tsx
 import type { Metadata } from "next";
 import MeetingsPage from "./MeetingsPageClient";
 
@@ -7,5 +8,10 @@ export const metadata: Metadata = {
 };
 
 export default function Page() {
-  return <MeetingsPage />;
+  // ← 親で横方向を確実にクリップ
+  return (
+    <div className="w-full max-w-[100vw] overflow-x-clip">
+      <MeetingsPage />
+    </div>
+  );
 }

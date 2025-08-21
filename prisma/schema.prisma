@@ -46,23 +46,21 @@ model GameScore {
   @@index([game, score])
 }
 
-model ConferenceRound {
-  id        String   @id @default(cuid())
-  fy        String                 // 例: "2025" or "R6"（どちらでもOK）
-  round     String                 // 例: "01" "02" …（ゼロ埋め推奨）
-  title     String
-  subtitle  String?
-  heroUrl   String?
-  intro     String?
-  sections  Json     @default("[]") // [{ id, type, title, body } | { id, type:'timeline', title, items: [...] }]
-  gallery   Json     @default("[]") // [{ id, url, caption }]
-  published Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([fy, round])
-  @@index([fy, round])
+model MeetingReport {
+  id          Int       @id @default(autoincrement())
+  title       String
+  slug        String    @unique        // 公開ページのパス生成に使用（/arc/conference/reports/[slug] 等）
+  date        DateTime                  // 開催日
+  round       Int                       // 1/2/3/4
+  fiscalYear  Int                       // 2025=令和7年度 など
+  reportUrl   String?                   // 既存の外部/内部URLがあれば（無ければ /arc/conference/reports/[slug] を使う）
+  coverUrl    String?                   // サムネイル画像の絶対 or ルート相対URL
+  youtubeId   String?                   // YouTube ID (任意)
+  isPublished Boolean   @default(false) // 公開フラグ（管理画面でON）
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 }
+
 
 
 model User {
