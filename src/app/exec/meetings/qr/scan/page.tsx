@@ -1,7 +1,7 @@
 // app/exec/meetings/qr/scan/page.tsx
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import ArcHeader from "@/components/ArcHeader";
+import ArcHeader from "@/src/components/ArcHeader";
 import Link from "next/link";
 import { verifyToken, COOKIE_NAME } from "@/lib/auth";
 import QRScanClient from "../scan-client";

@@ -2,7 +2,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { verifyToken, COOKIE_NAME } from "@/lib/auth";
-import ArcHeader from "@/components/ArcHeader";
+import ArcHeader from "@/src/components/ArcHeader";
 import Link from "next/link";
 import React, { type ReactNode } from "react";
 import styles from "./exec.module.css";

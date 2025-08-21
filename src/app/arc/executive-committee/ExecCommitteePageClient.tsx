@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { motion, useScroll, useTransform } from "framer-motion";
 import { FaFacebook, FaInstagram, FaXTwitter, FaLine } from "react-icons/fa6";
-import ArcHeader1 from "@/components/ArcHeader1";
+import ArcHeader1 from "@/src/components/ArcHeader1";
 
 /* ===== 初心者でも編集しやすい外部JSON =====
    /public/excom/members.json に配列で置くだけ

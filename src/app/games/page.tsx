@@ -5,7 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { motion } from "framer-motion";
 import { ChevronLeft, Gamepad2 } from "lucide-react";
-import ArcHeader1 from "@/components/ArcHeader1";
+import ArcHeader1 from "@/src/components/ArcHeader1";
 
 /* ====== ナビ（ヘッダーはそのまま使う） ====== */
 const navItems = [

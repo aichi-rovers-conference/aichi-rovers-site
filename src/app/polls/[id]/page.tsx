@@ -4,11 +4,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 
-import ScaleQuestion from "@/components/polls/ScaleQuestion";
-import CheckboxQuestion from "@/components/polls/CheckboxQuestion";
-import RadioQuestion from "@/components/polls/RadioQuestion";
-import TextQuestion from "@/components/polls/TextQuestion";
-import RatingQuestion from "@/components/polls/RatingQuestion";
+import ScaleQuestion from "@/src/components/polls/ScaleQuestion";
+import CheckboxQuestion from "@/src/components/polls/CheckboxQuestion";
+import RadioQuestion from "@/src/components/polls/RadioQuestion";
+import TextQuestion from "@/src/components/polls/TextQuestion";
+import RatingQuestion from "@/src/components/polls/RatingQuestion";
 
 /* ===================== 型 ===================== */
 

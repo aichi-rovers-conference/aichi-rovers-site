@@ -2,7 +2,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { COOKIE_NAME, verifyToken } from "@/lib/auth";
-import ArcHeader from "@/components/ArcHeader";
+import ArcHeader from "@/src/components/ArcHeader";
 import Link from "next/link";
 import EmailQRClient from "./EmailQRClient";
 import { ArrowLeft, Mail } from "lucide-react";

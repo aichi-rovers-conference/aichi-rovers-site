@@ -4,8 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ChevronDown, Send, MailCheck, Loader2, Filter, QrCode } from "lucide-react";
 import QRCode from "qrcode";
-import { renderTemplate } from "@/lib/mailTemplate";
-import { buildPreviewQrUrl, buildQrPayload } from "@/lib/qr"; // ← 修正
+import { renderTemplate } from "@/src/lib/mailTemplate"
+import { buildPreviewQrUrl, buildQrPayload } from "@/src/lib/qr"; // ← 修正
 
 type Participant = {
   id: string;

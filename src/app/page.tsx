@@ -6,8 +6,8 @@ import Link from "next/link";
 import Image from "next/image";
 import { motion, useScroll, useTransform } from "framer-motion";
 import { FaFacebook, FaInstagram, FaXTwitter, FaLine } from "react-icons/fa6";
-import ExecAccessButton from "@/components/ExecAccessButton";
-import ArcHeader1 from "@/components/ArcHeader1";
+import ExecAccessButton from "../components/ExecAccessButton";
+import ArcHeader1 from "../components/ArcHeader1";
 
 export default function Home() {
   // ※ ヘッダーでの open 状態を使わないなら削ってOK
