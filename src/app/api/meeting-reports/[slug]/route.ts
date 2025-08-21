@@ -1,9 +1,12 @@
-// app/api/meeting-reports/[slug]/route.ts
+// src/app/api/meeting-reports/[slug]/route.ts
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import prisma from "@/lib/prisma";
 import { GalleryLayout as DbGalleryLayout } from "@prisma/client";
 
-// "grid"/"slideshow" → Prisma enum へ（大文字/小文字の両対応）
+// キャッシュさせない（必要なら）
+export const revalidate = 0;
+
+// "grid"/"slideshow"（大文字小文字混在可）→ Prisma enum へ
 const toDbLayout = (v: any): DbGalleryLayout | null => {
   const s = String(v ?? "").toLowerCase();
   const E = DbGalleryLayout as any;
@@ -12,11 +15,16 @@ const toDbLayout = (v: any): DbGalleryLayout | null => {
   return null;
 };
 
-// ===== GET （公開のみ返す。?preview=1 の時は下書きも返す）=====
-export async function GET(req: Request, { params }: { params: { slug: string } }) {
-  const slug = decodeURIComponent(params.slug);
-  const url = new URL(req.url);
-  const preview = url.searchParams.get("preview") === "1";
+// DB enum → UI 値（"grid" | "slideshow"）
+const fromDbLayout = (v: any): "grid" | "slideshow" | null => {
+  if (v == null) return null;
+  const s = String(v).toLowerCase();
+  return s === "slideshow" ? "slideshow" : s === "grid" ? "grid" : null;
+};
+
+export async function GET(_req: Request, context: any) {
+  const slug = decodeURIComponent(context?.params?.slug ?? "");
+  if (!slug) return NextResponse.json({ ok: false, message: "Bad request" }, { status: 400 });
 
   const report = await prisma.meetingReport.findUnique({
     where: { slug },
@@ -33,55 +41,48 @@ export async function GET(req: Request, { params }: { params: { slug: string } }
       isPublished: true,
       updatedAt: true,
       pageGallery: true,
-      groups: true,
-      pageGalleryLayout: true, // ← レイアウトも返す
-      // 旧互換が必要なら subtitle/lead/schedule/sections も追加
+      groups: true,               // 本文セクション(JSON)
+      pageGalleryLayout: true,    // enum
+      // 旧互換が必要なら subtitle / lead / schedule / sections も追加で select
     },
   });
 
-  if (!report || (!report.isPublished && !preview)) {
-    return NextResponse.json({ ok: false, message: "not found" }, { status: 404 });
-  }
+  if (!report) return NextResponse.json({ ok: false, message: "Not found" }, { status: 404 });
 
-  return NextResponse.json({ ok: true, data: report });
+  // 必要なら enum → UI 値へ寄せて返却
+  const data = {
+    ...report,
+    pageGalleryLayout: fromDbLayout(report.pageGalleryLayout),
+  };
+
+  return NextResponse.json({ ok: true, data });
 }
 
-// ===== PUT （存在すれば更新・無ければ作成）=====
-export async function PUT(req: Request, { params }: { params: { slug: string } }) {
-  const slug = decodeURIComponent(params.slug);
+export async function PUT(req: Request, context: any) {
+  const slug = decodeURIComponent(context?.params?.slug ?? "");
+  if (!slug) return NextResponse.json({ ok: false, message: "Bad request" }, { status: 400 });
+
   const body = await req.json();
 
-  const pageGalleryLayoutCreate = toDbLayout(body.pageGalleryLayout);
-  const pageGalleryLayoutUpdate = { set: toDbLayout(body.pageGalleryLayout) };
+  // UI 側は sections で送ってくる想定（後方互換で groups も許可）
+  const groups =
+    Array.isArray(body.sections) ? body.sections :
+    Array.isArray(body.groups) ? body.groups : [];
 
-  const dataCommon = {
-    title: String(body.title ?? ""),
-    date: new Date(body.date),
-    round: Number(body.round ?? 1),
-    fiscalYear: Number(body.fiscalYear),
-    reportUrl: body.reportUrl ? String(body.reportUrl) : null,
-    coverUrl: body.coverUrl ? String(body.coverUrl) : null,
-    youtubeId: body.youtubeId ? String(body.youtubeId) : null,
-    isPublished: !!body.isPublished,
-    pageGallery: Array.isArray(body.pageGallery) ? body.pageGallery : [],
-    // エディタは payload.sections で送る想定。後方互換で body.groups も許容
-    groups: Array.isArray(body.sections)
-      ? body.sections
-      : Array.isArray(body.groups)
-      ? body.groups
-      : [],
-  } as const;
-
-  const updated = await prisma.meetingReport.upsert({
+  const updated = await prisma.meetingReport.update({
     where: { slug },
-    create: {
-      slug,
-      ...dataCommon,
-      pageGalleryLayout: pageGalleryLayoutCreate, // create は値そのもの
-    },
-    update: {
-      ...dataCommon,
-      pageGalleryLayout: pageGalleryLayoutUpdate, // update は { set: 値 }
+    data: {
+      title: body.title,
+      date: new Date(body.date),
+      round: body.round,
+      fiscalYear: body.fiscalYear,
+      reportUrl: body.reportUrl ?? null,
+      coverUrl: body.coverUrl ?? null,
+      youtubeId: body.youtubeId ?? null,
+      isPublished: !!body.isPublished,
+      pageGallery: body.pageGallery ?? [],
+      groups, // ← 子ギャラリーの layout も JSON に含まれて保存されます
+      pageGalleryLayout: { set: toDbLayout(body.pageGalleryLayout) }, // ← 重要
     },
     select: {
       id: true,
@@ -92,5 +93,11 @@ export async function PUT(req: Request, { params }: { params: { slug: string } }
     },
   });
 
-  return NextResponse.json({ ok: true, data: updated });
+  return NextResponse.json({
+    ok: true,
+    data: {
+      ...updated,
+      pageGalleryLayout: fromDbLayout(updated.pageGalleryLayout),
+    },
+  });
 }
