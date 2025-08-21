@@ -1,21 +1,25 @@
-// app/arc/conference/MeetingsPageClient.tsx
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { motion, useScroll, useTransform } from "framer-motion";
 import { FaFacebook, FaInstagram, FaXTwitter, FaLine } from "react-icons/fa6";
-import ArcHeader1 from "@/components/ArcHeader1";
+import ArcHeader1 from "@/src/components/ArcHeader1";
 
-type Meeting = {
+/* ===== 型（DB = MeetingReportに対応） ===== */
+type MeetingReport = {
   id: number;
-  date: string; // YYYY-MM-DD
-  round: 1 | 2 | 3 | 4;
-  fiscalYear: number;
-  reportUrl: string; // 内部/外部どちらも可
   title: string;
+  slug: string;
+  date: string;           // ISO文字列で受け取る
+  round: number;          // 1..4
+  fiscalYear: number;     // 例: 2025（令和7年度）
+  reportUrl?: string | null;
+  coverUrl?: string | null;
   youtubeId?: string | null;
-  thumb?: string | null; // ルート相対 or 絶対URL
+  isPublished: boolean;
+  createdAt: string;
+  updatedAt: string;
 };
 
 function toWarekiFiscalLabel(fy: number) {
@@ -24,6 +28,13 @@ function toWarekiFiscalLabel(fy: number) {
 }
 function roundLabel(n: number) {
   return n === 3 ? "第３回（定例会・交流会）" : `第${n}回`;
+}
+function fmtDate(d: string) {
+  const dt = new Date(d);
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, "0");
+  const day = String(dt.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function NewBadge() {
@@ -36,17 +47,14 @@ function NewBadge() {
   );
 }
 
-/* ====== コンポーネント ====== */
-function LatestHighlight({ item }: { item: Meeting }) {
-  const isExternal = item.reportUrl.startsWith("http");
-
+function LatestHighlight({ item }: { item: MeetingReport }) {
+  const link = item.reportUrl || `/arc/conference/reports/${encodeURIComponent(item.slug)}`;
+  const isExternal = /^https?:\/\//i.test(link);
   return (
     <div className="relative rounded-2xl border border-gray-200 bg-white shadow-sm p-4 sm:p-5 overflow-hidden overflow-x-clip">
-      {/* NEW バッジ */}
       <NewBadge />
-
       <div className="flex items-center justify-between mb-2">
-        <h3 className="font-bold text-gray-900 leading-tight" style={{ fontSize: "clamp(18px, 3.8vw, 24px)" }}>
+        <h3 className="font-bold text-gray-900 leading-tight" style={{ fontSize: "clamp(18px,3.8vw,24px)" }}>
           最新のレポート
         </h3>
         <div className="h-[3px] w-10 bg-red-600 rounded-full" />
@@ -60,52 +68,52 @@ function LatestHighlight({ item }: { item: Meeting }) {
               <iframe
                 className="w-full h-full"
                 src={`https://www.youtube.com/embed/${item.youtubeId}`}
-                title="ARC 定例会ハイライト"
+                title={item.title}
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                 referrerPolicy="strict-origin-when-cross-origin"
                 allowFullScreen
                 loading="lazy"
               />
             </div>
-          ) : item.thumb ? (
+          ) : item.coverUrl ? (
             <div className="relative">
               <Image
-                src={item.thumb}
-                alt={item.title ?? "定例会の様子"}
+                src={item.coverUrl}
+                alt={item.title}
                 width={960}
                 height={540}
-                sizes="(max-width: 768px) 92vw, (max-width: 1024px) 60vw, 640px"
+                sizes="(max-width:768px)92vw,(max-width:1024px)60vw,640px"
                 className="rounded-xl shadow object-cover w-full max-w-full h-auto"
                 priority={false}
               />
             </div>
           ) : (
             <div className="aspect-video w-full rounded-xl bg-gray-100 grid place-items-center text-gray-500">
-              No Video / Thumbnail
+              No Video / Image
             </div>
           )}
         </div>
 
         {/* 右：テキスト＋ボタン */}
         <div className="space-y-3 overflow-x-clip">
-          <div className="text-gray-500" style={{ fontSize: "clamp(12px, 2.8vw, 14px)" }}>
+          <div className="text-gray-500" style={{ fontSize: "clamp(12px,2.8vw,14px)" }}>
             {toWarekiFiscalLabel(item.fiscalYear)}
           </div>
-          <h4 className="font-semibold text-gray-900 leading-snug" style={{ fontSize: "clamp(16px, 3.6vw, 20px)" }}>
-            {item.title ?? `${roundLabel(item.round)} 定例会`}
+          <h4 className="font-semibold text-gray-900 leading-snug" style={{ fontSize: "clamp(16px,3.6vw,20px)" }}>
+            {item.title || `${roundLabel(item.round)} 定例会`}
           </h4>
-          <div className="text-gray-700" style={{ fontSize: "clamp(13px, 3vw, 16px)" }}>
-            {item.date}
+          <div className="text-gray-700" style={{ fontSize: "clamp(13px,3vw,16px)" }}>
+            {fmtDate(item.date)}
           </div>
           <motion.a
-            href={item.reportUrl}
+            href={link}
             target={isExternal ? "_blank" : undefined}
             rel={isExternal ? "noopener noreferrer" : undefined}
             whileHover={{ y: -3, scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             transition={{ type: "spring", stiffness: 320, damping: 24 }}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-red-600 font-bold text-gray-900 bg-white shadow-sm"
-            style={{ fontSize: "clamp(13px, 3.2vw, 15px)" }}
+            style={{ fontSize: "clamp(13px,3.2vw,15px)" }}
           >
             報告ページへ <span aria-hidden>→</span>
           </motion.a>
@@ -115,11 +123,12 @@ function LatestHighlight({ item }: { item: Meeting }) {
   );
 }
 
-function MeetingCard({ m }: { m: Meeting }) {
-  const isExternal = m.reportUrl.startsWith("http");
+function MeetingCard({ m }: { m: MeetingReport }) {
+  const link = m.reportUrl || `/arc/conference/reports/${encodeURIComponent(m.slug)}`;
+  const isExternal = /^https?:\/\//i.test(link);
   return (
     <motion.a
-      href={m.reportUrl}
+      href={link}
       target={isExternal ? "_blank" : undefined}
       rel={isExternal ? "noopener noreferrer" : undefined}
       whileHover={{ y: -4, scale: 1.02 }}
@@ -128,13 +137,13 @@ function MeetingCard({ m }: { m: Meeting }) {
       className="block rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden"
     >
       <div className="aspect-[16/9] w-full bg-gray-100 overflow-hidden">
-        {m.thumb ? (
+        {m.coverUrl ? (
           <Image
-            src={m.thumb}
-            alt={m.title ?? "定例会の様子"}
+            src={m.coverUrl}
+            alt={m.title}
             width={800}
             height={450}
-            sizes="(max-width: 640px) 92vw, (max-width: 1024px) 44vw, 300px"
+            sizes="(max-width:640px)92vw,(max-width:1024px)44vw,300px"
             className="w-full h-full max-w-full object-cover"
           />
         ) : (
@@ -142,16 +151,16 @@ function MeetingCard({ m }: { m: Meeting }) {
         )}
       </div>
       <div className="p-4">
-        <div className="text-gray-500 mb-1" style={{ fontSize: "clamp(11px, 2.8vw, 12px)" }}>
+        <div className="text-gray-500 mb-1" style={{ fontSize: "clamp(11px,2.8vw,12px)" }}>
           {toWarekiFiscalLabel(m.fiscalYear)}
         </div>
-        <div className="font-semibold text-gray-900" style={{ fontSize: "clamp(15px, 3.4vw, 18px)" }}>
-          {m.title ?? `${roundLabel(m.round)} 定例会`}
+        <div className="font-semibold text-gray-900" style={{ fontSize: "clamp(15px,3.4vw,18px)" }}>
+          {m.title || `${roundLabel(m.round)} 定例会`}
         </div>
-        <div className="text-gray-600 mt-1" style={{ fontSize: "clamp(12px, 3vw, 14px)" }}>
-          {m.date}
+        <div className="text-gray-600 mt-1" style={{ fontSize: "clamp(12px,3vw,14px)" }}>
+          {fmtDate(m.date)}
         </div>
-        <div className="mt-3 inline-flex items-center font-bold text-red-700" style={{ fontSize: "clamp(12px, 3.2vw, 14px)" }}>
+        <div className="mt-3 inline-flex items-center font-bold text-red-700" style={{ fontSize: "clamp(12px,3.2vw,14px)" }}>
           レポートを見る <span className="ml-1" aria-hidden>→</span>
         </div>
       </div>
@@ -178,16 +187,18 @@ export default function MeetingsPage() {
     { name: "ミニゲーム", path: "/games" },
   ];
 
-  // データ読込：公開済み全件
-  const [items, setItems] = useState<Meeting[] | null>(null);
+  const [items, setItems] = useState<MeetingReport[] | null>(null);
 
   useEffect(() => {
-    fetch("/api/meetings/reports/public", { cache: "no-store" })
+    // 公開済みのみ返すエンドポイントを想定
+    fetch("/api/meeting-reports/public", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : []))
-      .then((data: Meeting[]) => {
+      .then((data: MeetingReport[]) => {
         if (!Array.isArray(data)) return setItems([]);
-        // date降順がAPI側で担保されているが、念のためソート
-        const cooked = data.sort((a, b) => (a.date < b.date ? 1 : -1));
+        // 「開催日」降順
+        const cooked = data
+          .filter((r) => r.isPublished)
+          .sort((a, b) => (a.date < b.date ? 1 : -1));
         setItems(cooked);
       })
       .catch(() => setItems([]));
@@ -195,23 +206,21 @@ export default function MeetingsPage() {
 
   const latest = items?.[0] ?? null;
 
-  // 年度ごとにグループ（降順）
+  // 年度ごとにグループ（降順 / 同年度内は round 1→4）
   const grouped = useMemo(() => {
-    const map = new Map<number, Meeting[]>();
+    const map = new Map<number, MeetingReport[]>();
     (items ?? []).forEach((m) => {
       if (!map.has(m.fiscalYear)) map.set(m.fiscalYear, []);
       map.get(m.fiscalYear)!.push(m);
     });
     for (const [fy, arr] of map) {
-      arr.sort((a, b) => a.round - b.round); // 第1→第4
-      map.set(fy, arr);
+      arr.sort((a, b) => a.round - b.round);
     }
-    return Array.from(map.entries()).sort((a, b) => b[0] - a[0]); // 年度降順
+    return Array.from(map.entries()).sort((a, b) => b[0] - a[0]);
   }, [items]);
 
   return (
     <div className="w-full bg-white max-w-[100vw] overflow-x-clip">
-      {/* ヘッダー */}
       <ArcHeader1 navItems={navItems} />
 
       {/* ヒーロー */}
@@ -237,22 +246,16 @@ export default function MeetingsPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.9, ease: "easeOut" }}
         >
-          <h1
-            className="text-white font-extrabold drop-shadow-lg leading-tight"
-            style={{ fontSize: "clamp(28px, 7vw, 48px)" }}
-          >
+          <h1 className="text-white font-extrabold drop-shadow-lg leading-tight" style={{ fontSize: "clamp(28px,7vw,48px)" }}>
             定例会の様子
           </h1>
-          <p
-            className="text-white/90 font-medium mt-2 sm:mt-3"
-            style={{ fontSize: "clamp(14px, 4.6vw, 24px)" }}
-          >
+          <p className="text-white/90 font-medium mt-2 sm:mt-3" style={{ fontSize: "clamp(14px,4.6vw,24px)" }}>
             ARC Regular Meetings Report
           </p>
         </motion.div>
       </div>
 
-      {/* 本文：最新 */}
+      {/* 本文 */}
       <section className="w-full bg-white py-10 sm:py-12 md:py-14 px-4 sm:px-6 md:px-10 lg:px-16 max-w-[100vw] overflow-x-clip">
         <div className="mx-auto max-w-6xl space-y-8">
           {latest ? (
@@ -263,34 +266,26 @@ export default function MeetingsPage() {
             </div>
           )}
 
-          {/* 年度見出し */}
           <div>
-            <h2
-              className="text-gray-800 font-extrabold tracking-tight leading-tight"
-              style={{ fontSize: "clamp(20px, 4.4vw, 30px)" }}
-            >
+            <h2 className="text-gray-800 font-extrabold tracking-tight leading-tight" style={{ fontSize: "clamp(20px,4.4vw,30px)" }}>
               年度別アーカイブ
             </h2>
             <div className="mt-2 h-[2px] w-16 bg-red-600 rounded-full" />
           </div>
 
-          {/* 年度ごと（降順） */}
           <div className="space-y-10">
             {grouped.map(([fy, arr]) => (
               <div key={fy} className="space-y-4">
-                <h3
-                  className="font-bold text-gray-900"
-                  style={{ fontSize: "clamp(18px, 3.8vw, 24px)" }}
-                >
+                <h3 className="font-bold text-gray-900" style={{ fontSize: "clamp(18px,3.8vw,24px)" }}>
                   {toWarekiFiscalLabel(fy)}
                 </h3>
-                <div className="text-gray-600 -mt-1" style={{ fontSize: "clamp(12px, 3vw, 14px)" }}>
+                <div className="text-gray-600 -mt-1" style={{ fontSize: "clamp(12px,3vw,14px)" }}>
                   第１回 / 第２回 / 第３回（毎年三回目は定例会・交流会になります） / 第４回
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
                   {arr.map((m) => (
-                    <MeetingCard key={`${m.id}`} m={m} />
+                    <MeetingCard key={m.id} m={m} />
                   ))}
                 </div>
               </div>
@@ -299,26 +294,20 @@ export default function MeetingsPage() {
         </div>
       </section>
 
-      {/* 友情シールプロジェクト（既存そのまま） */}
+      {/* 友情シール（そのまま） */}
       <section className="px-4 sm:px-6 md:px-10 lg:px-16 pb-12 max-w-[100vw] overflow-x-clip">
         <div className="mx-auto max-w-6xl">
           <div className="text-center py-8 sm:py-10">
-            <h2
-              className="font-extrabold text-gray-900"
-              style={{ fontSize: "clamp(22px, 5vw, 32px)" }}
-            >
+            <h2 className="font-extrabold text-gray-900" style={{ fontSize: "clamp(22px,5vw,32px)" }}>
               友情シールプロジェクト
             </h2>
-            <p className="mt-2 font-semibold text-red-700" style={{ fontSize: "clamp(14px, 4.2vw, 20px)" }}>
+            <p className="mt-2 font-semibold text-red-700" style={{ fontSize: "clamp(14px,4.2vw,20px)" }}>
               Scouts of AICHI siblings together
             </p>
-            <p className="mt-1 font-bold text-gray-800" style={{ fontSize: "clamp(13px, 3.8vw, 18px)" }}>
+            <p className="mt-1 font-bold text-gray-800" style={{ fontSize: "clamp(13px,3.8vw,18px)" }}>
               （愛知のスカウトはみな兄弟である）
             </p>
-            <p
-              className="mt-4 text-gray-700 leading-relaxed mx-auto max-w-3xl"
-              style={{ fontSize: "clamp(13px, 3.6vw, 16px)" }}
-            >
+            <p className="mt-4 text-gray-700 leading-relaxed mx-auto max-w-3xl" style={{ fontSize: "clamp(13px,3.6vw,16px)" }}>
               この言葉をキーワードに、定例会が「愛知の兄弟たちが集う温かい場所」になり、友情の輪が広がっていくことへの願いを込めたプロジェクトです。
               まだARC定例会に参加したことの無い仲間を誘い、友情シールを貰おう！
             </p>
@@ -330,7 +319,7 @@ export default function MeetingsPage() {
               alt="友情シールプロジェクト フライヤー"
               width={920}
               height={600}
-              sizes="(max-width: 640px) 92vw, (max-width: 1024px) 80vw, 920px"
+              sizes="(max-width:640px)92vw,(max-width:1024px)80vw,920px"
               className="rounded-xl shadow-lg object-contain bg-white w-full max-w-[920px] max-w-full h-auto"
             />
           </div>
@@ -381,17 +370,17 @@ export default function MeetingsPage() {
       {/* フッター */}
       <footer className="bg-gray-900 text-white py-8 mt-10 max-w-[100vw] overflow-x-clip">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 md:px-10 lg:px-16 text-center">
-          <p className="font-semibold mb-2" style={{ fontSize: "clamp(14px, 3.6vw, 18px)" }}>
+          <p className="font-semibold mb-2" style={{ fontSize: "clamp(14px,3.6vw,18px)" }}>
             お問い合わせ
           </p>
           <a
             href="mailto:aichi.rovers.conference@gmail.com"
             className="text-red-400 hover:text-red-300 transition-colors break-all"
-            style={{ fontSize: "clamp(13px, 3.4vw, 16px)" }}
+            style={{ fontSize: "clamp(13px,3.4vw,16px)" }}
           >
             aichi.rovers.conference@gmail.com
           </a>
-          <p className="mt-4 text-gray-400" style={{ fontSize: "clamp(11px, 3vw, 14px)" }}>
+          <p className="mt-4 text-gray-400" style={{ fontSize: "clamp(11px,3vw,14px)" }}>
             &copy; {new Date().getFullYear()} Aichi Rovers Conference. All rights reserved.
           </p>
         </div>

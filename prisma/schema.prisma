@@ -14,6 +14,11 @@ enum Role {
   VIEWER
 }
 
+enum GalleryLayout {
+  GRID
+  SLIDESHOW
+}
+
 /**
  * ✅ 日本語ラベルは @map でDB値にマッピング（キーは英数字と_のみ）
  */
@@ -47,20 +52,26 @@ model GameScore {
 }
 
 model MeetingReport {
-  id          Int       @id @default(autoincrement())
-  title       String
-  slug        String    @unique        // 公開ページのパス生成に使用（/arc/conference/reports/[slug] 等）
-  date        DateTime                  // 開催日
-  round       Int                       // 1/2/3/4
-  fiscalYear  Int                       // 2025=令和7年度 など
-  reportUrl   String?                   // 既存の外部/内部URLがあれば（無ければ /arc/conference/reports/[slug] を使う）
-  coverUrl    String?                   // サムネイル画像の絶対 or ルート相対URL
-  youtubeId   String?                   // YouTube ID (任意)
-  isPublished Boolean   @default(false) // 公開フラグ（管理画面でON）
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-}
+  id            Int       @id @default(autoincrement())
+  title         String
+  slug          String    @unique
+  date          DateTime
+  round         Int
+  fiscalYear    Int
+  reportUrl     String?
+  coverUrl      String?
+  youtubeId     String?
+  isPublished   Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
+  // 制作UIで作った内容をそのまま保存するJSON
+  pageGallery   Json?
+  groups        Json?
+
+  // ② 追加：ページ全体ギャラリーの表示モード
+  pageGalleryLayout GalleryLayout?
+}
 
 
 model User {
