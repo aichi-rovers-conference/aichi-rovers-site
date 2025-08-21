@@ -14,12 +14,16 @@
     "jsx": "preserve",
     "incremental": true,
     "plugins": [
-      {
-        "name": "next"
-      }
+      { "name": "next" }
     ],
+
+    /* ★ ここを重要修正 */
+    "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["*"]                /* app/ も src/ も含めてプロジェクト直下を解決 */
+      /* もし厳密に分けたい場合は下記でもOK:
+         "@/*": ["./app/*", "./src/*"]
+      */
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],

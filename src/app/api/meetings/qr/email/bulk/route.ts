@@ -3,8 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../../../../../../lib/prisma";
 import { cookies } from "next/headers";
 import { COOKIE_NAME, verifyToken } from "@/lib/auth";
-import { renderTemplate, normalizeNewlines } from "@/lib/mailTemplate";
-import { buildPreviewQrUrl } from "@/lib/qr";
+import { renderTemplate, normalizeNewlines } from "@/src/lib/mailTemplate";
+import { buildPreviewQrUrl } from "@/src/lib/qr";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

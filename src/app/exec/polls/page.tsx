@@ -7,9 +7,9 @@ import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-import ArcHeader from "@/components/ArcHeader";
-import PollCard from "@/components/polls/PollCard";
-import ScrollProgressBar from "@/app/polls/ScrollProgressBar";
+import ArcHeader from "@/src/components/ArcHeader";
+import PollCard from "../../polls/PollCard";
+import ScrollProgressBar from "../../polls/ScrollProgressBar";
 
 /* ===================== 型＆ユーティリティ ===================== */
 

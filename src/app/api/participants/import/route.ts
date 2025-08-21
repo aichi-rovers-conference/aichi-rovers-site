@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "../../../../../lib/prisma";
 import { District as DistrictEnum } from "@prisma/client";
-import { rebuildMeetingSheet } from "@/lib/buildMeetingSheet";
+import { rebuildMeetingSheet } from "@/src/lib/buildMeetingSheet";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";

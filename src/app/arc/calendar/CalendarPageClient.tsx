@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { motion, useScroll, useTransform } from "framer-motion";
 import { FaFacebook, FaInstagram, FaXTwitter, FaLine } from "react-icons/fa6";
-import ArcHeader1 from "@/components/ArcHeader1";
+import ArcHeader1 from "@/src/components/ArcHeader1";
 
 /** === 設定（編集者向け） ===========================================
  * 1) イベント一覧の置き場所：/public/calendar/events.json

@@ -2,12 +2,12 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import ScrollProgressBar from "@/app/polls/ScrollProgressBar";
+import ScrollProgressBar from "@/src/app/polls/ScrollProgressBar";
 import { AnimatePresence, motion } from "framer-motion";
-import QuestionCard from "@/components/polls/QuestionCard";
-import AddQuestionMenu from "@/components/polls/AddQuestionMenu";
-import type { Question, QuestionType } from "@/components/polls/types";
-import ArcHeader from "@/components/ArcHeader";
+import QuestionCard from "@/src/components/polls/QuestionCard";
+import AddQuestionMenu from "@/src/components/polls/AddQuestionMenu";
+import type { Question, QuestionType } from "@/src/components/polls/types";
+import ArcHeader from "@/src/components/ArcHeader";
 
 const MAX_QUESTIONS = 20;
 const uid = () =>

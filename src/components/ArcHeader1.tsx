@@ -1,4 +1,4 @@
-// components/ArcHeader2.tsx
+// components/ArcHeader1.tsx
 "use client";
 
 import { useState } from "react";

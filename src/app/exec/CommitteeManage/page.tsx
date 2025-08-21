@@ -6,9 +6,9 @@ import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import Image from "next/image";
-import ScrollProgressBar from "@/app/polls/ScrollProgressBar";
+import ScrollProgressBar from "../../polls/ScrollProgressBar";
 import { XCircle, CheckCircle2, Lock, Eye, EyeOff, KeyRound, Power, MoreVertical } from "lucide-react";
-import ArcHeader from "@/components/ArcHeader";
+import ArcHeader from "@/src/components/ArcHeader";
 
 type Role = "ADMIN" | "EDITOR" | "VIEWER";
 type Status = { id: number; username: string; role: Role; isSuper: boolean };

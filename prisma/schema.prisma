@@ -14,6 +14,11 @@ enum Role {
   VIEWER
 }
 
+enum GalleryLayout {
+  GRID
+  SLIDESHOW
+}
+
 /**
  * ✅ 日本語ラベルは @map でDB値にマッピング（キーは英数字と_のみ）
  */
@@ -46,22 +51,26 @@ model GameScore {
   @@index([game, score])
 }
 
-model ConferenceRound {
-  id        String   @id @default(cuid())
-  fy        String                 // 例: "2025" or "R6"（どちらでもOK）
-  round     String                 // 例: "01" "02" …（ゼロ埋め推奨）
-  title     String
-  subtitle  String?
-  heroUrl   String?
-  intro     String?
-  sections  Json     @default("[]") // [{ id, type, title, body } | { id, type:'timeline', title, items: [...] }]
-  gallery   Json     @default("[]") // [{ id, url, caption }]
-  published Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+model MeetingReport {
+  id            Int       @id @default(autoincrement())
+  title         String
+  slug          String    @unique
+  date          DateTime
+  round         Int
+  fiscalYear    Int
+  reportUrl     String?
+  coverUrl      String?
+  youtubeId     String?
+  isPublished   Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  @@unique([fy, round])
-  @@index([fy, round])
+  // 制作UIで作った内容をそのまま保存するJSON
+  pageGallery   Json?
+  groups        Json?
+
+  // ② 追加：ページ全体ギャラリーの表示モード
+  pageGalleryLayout GalleryLayout?
 }
 
 

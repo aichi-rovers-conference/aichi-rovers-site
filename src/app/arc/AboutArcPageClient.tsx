@@ -6,7 +6,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { motion, useScroll, useTransform } from "framer-motion";
 import { FaFacebook, FaInstagram, FaXTwitter, FaLine } from "react-icons/fa6";
-import ArcHeader1 from "@/components/ArcHeader1";
+import ArcHeader1 from "@/src/components/ArcHeader1";
 
 /** セクション（左テキスト／右画像） */
 function TextRightImage({
