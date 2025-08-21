@@ -1,7 +1,6 @@
 // components/ArcHeader.tsx
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
@@ -10,7 +9,6 @@ import { ArrowLeft } from "lucide-react";
 export default function ArcHeader() {
   const pathname = usePathname() || "/";
   const router = useRouter();
-  const [open, setOpen] = useState(false);
 
   const isExecRoot = pathname === "/exec" || pathname === "/exec/";
 
@@ -29,9 +27,8 @@ export default function ArcHeader() {
   return (
     <header className="sticky top-0 z-50 bg-white/90 backdrop-blur border-b border-gray-200">
       <div className="max-w-7xl mx-auto px-4 md:px-8">
-        {/* relative 化して中央要素を absolute センター固定 */}
         <div className="relative h-16 md:h-20 flex items-center">
-          {/* Left: 戻るボタン（通常フロー） */}
+          {/* Left: 戻るボタン */}
           <button
             type="button"
             onClick={goBack}
@@ -44,17 +41,16 @@ export default function ArcHeader() {
             </span>
           </button>
 
-          {/* Center: ブランド（画面中央に absolute 固定） */}
+          {/* Center: ブランド（中央固定） */}
           <Link
             href="/exec/"
-            aria-label="ARC運営委員会トップへ"
+            aria-label="Aichi Rovers Conference（ARC）"
             className="
               absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2
               flex items-center gap-2 sm:gap-3 select-none
               rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-red-700/50
               min-w-0
-              /* モバイル時は左右に140pxぶんの安全余白を確保して重なり回避 */
-              max-w-[calc(100vw-140px)] sm:max-w-none
+              max-w-[calc(100vw-120px)] sm:max-w-none
             "
           >
             <Image
@@ -66,8 +62,12 @@ export default function ArcHeader() {
               priority
               draggable={false}
             />
+            {/* モバイル: ARC / sm以上: フル表記 */}
+            <span className="font-extrabold tracking-wide text-[15px] sm:hidden">
+              ARC
+            </span>
             <span
-              className="leading-tight font-extrabold tracking-wide text-[13px] sm:text-base md:text-2xl truncate text-center"
+              className="hidden sm:inline leading-tight font-extrabold tracking-wide text-base md:text-2xl truncate text-center"
               title="Aichi Rovers Conference"
             >
               <span className="text-red-700">A</span>ichi{" "}
