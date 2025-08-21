@@ -17,7 +17,6 @@ import {
 } from "lucide-react";
 
 export default async function ExecPage() {
-  // ← await が必要な環境向け
   const cookieStore = await cookies();
   const token = cookieStore.get(COOKIE_NAME)?.value ?? "";
   const session = token ? await verifyToken(token) : null;
@@ -28,7 +27,6 @@ export default async function ExecPage() {
 
   const isAdmin = session.role === "ADMIN";
 
-  // カード定義（順番はお好みで）
   const links: {
     href: string;
     icon: ReactNode;
@@ -69,19 +67,22 @@ export default async function ExecPage() {
     });
   }
 
-  // ADMIN は lg:2 列（=2×2）、2xl:4 列 / 非 ADMIN は lg:3 列
   const gridClass = isAdmin
     ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 2xl:grid-cols-4 gap-5 lg:gap-6 2xl:gap-8"
     : "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 lg:gap-6 2xl:gap-8";
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-white to-gray-50">
+    // ✨ 横はみ出しをクリップ
+    <div className="min-h-screen bg-gradient-to-b from-white to-gray-50 overflow-x-clip">
       <div className="h-2 w-full bg-gradient-to-r from-violet-400 via-fuchsia-400 to-indigo-400" />
       <ArcHeader />
       <main className="mx-auto px-4 md:px-8 py-10 max-w-7xl xl:max-w-[88rem] 2xl:max-w-[96rem]">
         {/* ヒーロー */}
-        <section className={styles.hero}>
-          <div className="absolute -top-24 -right-24 w-72 h-72 rounded-full bg-red-100 blur-3xl opacity-60 pointer-events-none" />
+        {/* ✨ 相対配置 + 横はみ出しクリップ */}
+        <section className={`${styles.hero} relative overflow-x-clip`}>
+          {/* ✨ 右端内に収める（-right をやめる）。blur のはみ出しも clip で消える */}
+          <div className="absolute -top-24 right-0 translate-x-1/4 w-72 h-72 rounded-full bg-red-100 blur-3xl opacity-60 pointer-events-none" />
+
           <div className="relative z-10 flex items-start gap-5">
             <div className="shrink-0 rounded-2xl bg-red-600/90 text-white p-3 md:p-3.5 xl:p-4 shadow">
               <ShieldCheck className="size-7 md:size-8 xl:size-9" />
@@ -131,7 +132,7 @@ export default async function ExecPage() {
   );
 }
 
-/* --------------- サブ：クイックリンクカード（大画面で拡大） --------------- */
+/* --------------- サブ：クイックリンクカード --------------- */
 function QuickLink({
   href,
   icon,
