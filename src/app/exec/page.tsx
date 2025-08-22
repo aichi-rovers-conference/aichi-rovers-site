@@ -16,7 +16,12 @@ import {
   UserCog,
 } from "lucide-react";
 
+// 追加：必ずSSRで再評価（ログアウト後の見え残り防止）
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function ExecPage() {
+  // ← ここは await が必要
   const cookieStore = await cookies();
   const token = cookieStore.get(COOKIE_NAME)?.value ?? "";
   const session = token ? await verifyToken(token) : null;
