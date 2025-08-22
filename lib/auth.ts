@@ -1,12 +1,8 @@
-// /lib/auth.ts — 正本（全ランタイム共通）
+// /lib/auth.ts
 import { SignJWT, jwtVerify } from "jose";
 
-export const COOKIE_NAME = "arc_session";
+export const COOKIE_NAME = "arc_session_v3"; // 新名：旧Cookieに影響されない
 export type Role = "ADMIN" | "EDITOR" | "VIEWER" | string;
-
-// どのファイルが実際に読み込まれているか識別するためのラベル
-export const AUTH_LIB_SOURCE =
-  (typeof import.meta !== "undefined" && (import.meta as any).url) || "unknown";
 
 const SECRET = new TextEncoder().encode(process.env.AUTH_SECRET || "dev-secret");
 export const ISS = process.env.AUTH_ISSUER ?? "https://aichirovers.com";
@@ -27,7 +23,7 @@ export type SessionClaims = {
 
 export async function signSession(
   payload: Omit<SessionClaims, "iat" | "exp" | "iss" | "aud">,
-  ttl: string
+  ttl: string // "30d" | "8h" など
 ): Promise<string> {
   return await new SignJWT({
     id: payload.id,
@@ -38,8 +34,8 @@ export async function signSession(
     remember: !!payload.remember,
   })
     .setProtectedHeader({ alg: "HS256" })
-    .setIssuer(ISS)          // ★ 必須
-    .setAudience(AUD)        // ★ 必須
+    .setIssuer(ISS)       // ★ 必須：ミドルウェアと一致
+    .setAudience(AUD)     // ★ 必須：ミドルウェアと一致
     .setIssuedAt()
     .setExpirationTime(ttl)
     .sign(SECRET);
@@ -53,8 +49,6 @@ export async function verifyToken(token: string): Promise<SessionClaims> {
   });
   return payload as SessionClaims;
 }
-
-export const verifySession = verifyToken;
 
 export async function verifyPassword(plain: string, hash: string) {
   const bcrypt = await import("bcryptjs").then(m => m.default || m);
