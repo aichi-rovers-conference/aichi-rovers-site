@@ -32,65 +32,74 @@ export default function UsersAdminPage() {
 
   const [q, setQ] = useState("");
 
-  // useEffect 全体を置き換え
-useEffect(() => {
-  let alive = true;
-  (async () => {
-    try {
-      // 1) 自分のステータス
-      const s = await fetch("/api/auth/status", { cache: "no-store" });
+  // 認証 → 一覧取得。401はログイン誘導、403は画面に表示（/execへ勝手に戻さない）
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        // 1) 自分のステータス
+        const s = await fetch("/api/auth/status", {
+          cache: "no-store",
+          credentials: "include", // ★ cookie を確実に送る
+          headers: { Accept: "application/json" },
+        });
 
-      if (s.status === 401) {                // 未ログインのみリダイレクト
-        router.replace("/?needLogin=1");
-        return;
-      }
-      if (!s.ok) {                           // それ以外はページにエラー表示
+        if (s.status === 401) {
+          router.replace(`/login?next=${encodeURIComponent("/polls/admin/users")}&auth=required`);
+          return;
+        }
+        if (!s.ok) {
+          if (!alive) return;
+          setError((await s.text().catch(() => "")) || "認証情報の取得に失敗しました");
+          setLoading(false);
+          return;
+        }
+
+        const meJson = (await s.json()) as Status;
         if (!alive) return;
-        setError(await s.text().catch(() => "認証情報の取得に失敗しました"));
-        setLoading(false);
-        return;
-      }
+        setMe(meJson);
 
-      const me = (await s.json()) as Status;
-      if (!alive) return;
-      setMe(me);
+        // 2) ユーザー一覧
+        const r = await fetch("/api/admin/users", {
+          cache: "no-store",
+          credentials: "include", // ★ cookie を確実に送る
+          headers: { Accept: "application/json" },
+        });
 
-      // 2) ユーザー一覧
-      const r = await fetch("/api/admin/users", { cache: "no-store" });
+        if (r.status === 401) {
+          router.replace(`/login?next=${encodeURIComponent("/polls/admin/users")}&auth=expired`);
+          return;
+        }
+        if (r.status === 403) {
+          if (!alive) return;
+          setError("このページを閲覧する権限がありません（ADMIN/SUPERのみ）");
+          setList([]);
+          setLoading(false);
+          return;
+        }
+        if (!r.ok) {
+          if (!alive) return;
+          setError((await r.text().catch(() => "")) || "ユーザー一覧の取得に失敗しました");
+          setList([]);
+          setLoading(false);
+          return;
+        }
 
-      if (r.status === 401) {                // 未ログインのみリダイレクト
-        router.replace("/?needLogin=1");
-        return;
-      }
-      if (r.status === 403) {                // 権限不足はページに残す
+        const data = await r.json();
         if (!alive) return;
-        setError("このページを閲覧する権限がありません（ADMIN/SUPERのみ）");
-        setList([]);                         // 閲覧不可なら空表示
+        setList((data.items as UserRow[]) || []);
+        setError("");
         setLoading(false);
-        return;
-      }
-      if (!r.ok) {                           // その他のエラーは表示して残る
+      } catch {
         if (!alive) return;
-        setError((await r.text().catch(() => "")) || "ユーザー一覧の取得に失敗しました");
-        setList([]);
+        setError("通信エラーが発生しました");
         setLoading(false);
-        return;
       }
-
-      const data = await r.json();
-      if (!alive) return;
-      setList(data.items as UserRow[]);
-      setError("");
-      setLoading(false);
-    } catch {
-      if (!alive) return;
-      setError("通信エラーが発生しました");
-      setLoading(false);
-    }
-  })();
-  return () => { alive = false; };
-}, [router]);
-
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [router]);
 
   const filtered = useMemo(() => {
     const k = q.trim().toLowerCase();
@@ -108,15 +117,24 @@ useEffect(() => {
     try {
       const res = await fetch("/api/admin/users", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", Accept: "application/json" },
+        credentials: "include",
         body: JSON.stringify(form),
       });
+      if (res.status === 401) {
+        router.replace(`/login?next=${encodeURIComponent("/polls/admin/users")}&auth=expired`);
+        return;
+      }
+      if (res.status === 403) {
+        setError("この操作にはSUPER権限が必要です");
+        return;
+      }
       if (!res.ok) throw new Error("作成に失敗しました（SUPER権限が必要です）");
       const json = await res.json();
       setList((prev) => [json.user as UserRow, ...prev]);
       alert(`ユーザーを作成しました。\nusername: ${json.user.username}\n一時パスワード: ${json.tempPassword}`);
     } catch (e: any) {
-      setError(e.message ?? "エラーが発生しました");
+      setError(e?.message ?? "エラーが発生しました");
     } finally {
       setCreating(false);
     }
@@ -126,9 +144,18 @@ useEffect(() => {
     setError("");
     const res = await fetch(`/api/admin/users/${id}`, {
       method: "PATCH",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", Accept: "application/json" },
+      credentials: "include",
       body: JSON.stringify(patch),
     });
+    if (res.status === 401) {
+      router.replace(`/login?next=${encodeURIComponent("/polls/admin/users")}&auth=expired`);
+      return;
+    }
+    if (res.status === 403) {
+      alert("この操作にはSUPER権限が必要です");
+      return;
+    }
     if (!res.ok) {
       const t = await res.text();
       alert(`失敗: ${t || res.status}`);
@@ -144,23 +171,30 @@ useEffect(() => {
   };
 
   const deleteUser = async (id: number) => {
-  setError("");
-  if (!confirm("このユーザーを削除します。よろしいですか？\n※ この操作は取り消せません")) return;
+    setError("");
+    if (!confirm("このユーザーを削除します。よろしいですか？\n※ この操作は取り消せません")) return;
 
-  const res = await fetch(`/api/admin/users/${id}`, {
-    method: "DELETE",
-    headers: { "content-type": "application/json" },
-    credentials: "include",
-  });
-  if (!res.ok) {
-    const t = await res.text();
-    alert(`削除に失敗: ${t || res.status}`);
-    return;
-  }
-  setList((prev) => prev.filter((u) => u.id !== id));
-  alert("削除しました");
-};
-
+    const res = await fetch(`/api/admin/users/${id}`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json", Accept: "application/json" },
+      credentials: "include",
+    });
+    if (res.status === 401) {
+      router.replace(`/login?next=${encodeURIComponent("/polls/admin/users")}&auth=expired`);
+      return;
+    }
+    if (res.status === 403) {
+      alert("この操作にはSUPER権限が必要です");
+      return;
+    }
+    if (!res.ok) {
+      const t = await res.text();
+      alert(`削除に失敗: ${t || res.status}`);
+      return;
+    }
+    setList((prev) => prev.filter((u) => u.id !== id));
+    alert("削除しました");
+  };
 
   if (loading) {
     return (
@@ -186,15 +220,10 @@ useEffect(() => {
   return (
     <div className="min-h-screen bg-gradient-to-b from-violet-50 via-slate-50 to-slate-50 text-slate-900">
       <ScrollProgressBar />
-      {/* アクセント帯 */}
       <div className="h-2 w-full bg-gradient-to-r from-violet-400 via-fuchsia-400 to-indigo-400" />
-
-      {/* ヘッダー（中央にロゴ＋ARCアンケート） */}
       <ArcHeader />
 
-      {/* コンテンツ */}
       <main className="mx-auto max-w-6xl px-6 py-8">
-        {/* タイトル行 */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold tracking-tight md:text-2xl">ユーザー管理</h1>
@@ -207,7 +236,6 @@ useEffect(() => {
           </div>
         </div>
 
-        {/* 上部カード：検索＆新規作成 */}
         <section className="mt-6 rounded-2xl bg-white/90 ring-1 ring-slate-200 shadow-sm p-4">
           <div className="flex flex-wrap items-end gap-3">
             <div className="flex-1 min-w-[220px]">
@@ -224,19 +252,16 @@ useEffect(() => {
           {error && <p className="mt-3 text-sm text-rose-600">{error}</p>}
         </section>
 
-        {/* 一覧テーブル */}
         <section className="mt-6 rounded-2xl overflow-hidden bg-white/95 ring-1 ring-slate-200 shadow-sm">
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm table-fixed">
               <colgroup>
-                {[
-                    <col key="c1" className="w-20" />,
-                    <col key="c2" />,
-                    <col key="c3" className="w-40" />,
-                    <col key="c4" className="w-36" />,
-                    <col key="c5" className="w-56 md:w-72 lg:w-[22rem] xl:w-[28rem]" />
-                ]}
-                </colgroup>
+                <col className="w-20" />
+                <col />
+                <col className="w-40" />
+                <col className="w-36" />
+                <col className="w-56 md:w-72 lg:w-[22rem] xl:w-[28rem]" />
+              </colgroup>
               <thead className="bg-slate-50">
                 <tr className="text-left text-slate-700">
                   <th className="px-4 py-2">ID</th>
@@ -292,9 +317,15 @@ useEffect(() => {
                               u.isActive ? "無効化しました" : "有効化しました"
                             );
                           }}
-                          onReset={() => { void patchUser(u.id, { resetPassword: true }); }}
-                          onSetPassword={(pwd) => { void patchUser(u.id, { newPassword: pwd }, "パスワードを変更しました"); }}
-                          onDelete={() => { void deleteUser(u.id); }}
+                          onReset={() => {
+                            void patchUser(u.id, { resetPassword: true });
+                          }}
+                          onSetPassword={(pwd) => {
+                            void patchUser(u.id, { newPassword: pwd }, "パスワードを変更しました");
+                          }}
+                          onDelete={() => {
+                            void deleteUser(u.id);
+                          }}
                         />
                       ) : (
                         <span className="text-slate-400">閲覧のみ</span>
@@ -463,7 +494,6 @@ function ActionCell({
     "inline-flex items-center gap-1.5 rounded-lg bg-rose-600 px-3 py-1.5 text-sm text-white font-semibold shadow-sm hover:opacity-95 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-rose-200 disabled:opacity-50";
 
   const submitChange = () => {
-    console.log("[pw] submitChange start"); // ← まずここが出るか
     const a = pw1.trim();
     const b = pw2.trim();
     if (a.length < 8) return setPwErr("8文字以上で入力してください");
@@ -477,7 +507,7 @@ function ActionCell({
 
   return (
     <div className="flex items-center">
-      {/* md以上: 4ボタン（有効/無効・再発行・変更・削除） */}
+      {/* md以上: 4ボタン */}
       <div className="hidden md:flex items-center gap-3">
         <button className={ghost} onClick={onToggle} title={isActive ? "無効化" : "有効化"} type="button">
           <Power className="h-4 w-4" />
@@ -503,7 +533,7 @@ function ActionCell({
         </button>
       </div>
 
-      {/* モバイル: ドロップダウン 4項目 */}
+      {/* モバイル: ドロップダウン */}
       <div className="relative md:hidden">
         <button
           ref={btnRef}
@@ -555,116 +585,93 @@ function ActionCell({
       </div>
 
       {/* パスワード変更モーダル */}
-      {/* パスワード変更モーダル */}
-{mounted && pwOpen && createPortal(
-  <div className="fixed inset-0 z-[120] flex items-center justify-center">
-    {/* ← オーバーレイは z-[120] */}
-    <div className="absolute inset-0 bg-black/40 z-[120]" onClick={() => setPwOpen(false)} />
-    {/* ← 本体を z-[121] で上に */}
-    <div
-      className="relative z-[121] w-[92%] max-w-md rounded-2xl bg-white p-6 ring-1 ring-slate-200 shadow-xl"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="pw-modal-title"
-      onClick={(e) => e.stopPropagation()} // 念のためバブル抑止
-    >
-      <div className="mb-4">
-        <h3 id="pw-modal-title" className="text-lg font-semibold text-slate-900">パスワード変更</h3>
-        <p className="mt-1 text-sm text-slate-700">8〜128文字。変更は即時に有効になります。</p>
-      </div>
-
-      {/* form で onSubmit */}
-      <form
-        className="space-y-4"
-        onSubmit={(e) => {
-          e.preventDefault();
-          console.log("[pw] onSubmit fired");
-          submitChange();
-        }}
-      >
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1" htmlFor="new-password">
-            新しいパスワード
-          </label>
-          <div className="relative">
-            <input
-              id="new-password"
-              type={show1 ? "text" : "password"}
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none shadow-sm placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
-              value={pw1}
-              onChange={(e) => setPw1(e.target.value)}
-              minLength={8}
-              maxLength={128}
-              autoFocus
-            />
-            <button
-              type="button"
-              className="absolute inset-y-0 right-2 inline-flex items-center"
-              aria-label={show1 ? "パスワードを隠す" : "パスワードを表示"}
-              onClick={() => setShow1(v => !v)}
-            >
-              {show1 ? <EyeOff className="h-4 w-4 text-slate-500" /> : <Eye className="h-4 w-4 text-slate-500" />}
-            </button>
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1" htmlFor="new-password-2">
-            新しいパスワード（確認）
-          </label>
-          <div className="relative">
-            <input
-              id="new-password-2"
-              type={show2 ? "text" : "password"}
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none shadow-sm placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
-              value={pw2}
-              onChange={(e) => setPw2(e.target.value)}
-              minLength={8}
-              maxLength={128}
-            />
-            <button
-              type="button"
-              className="absolute inset-y-0 right-2 inline-flex items-center"
-              aria-label={show2 ? "パスワードを隠す" : "パスワードを表示"}
-              onClick={() => setShow2(v => !v)}
-            >
-              {show2 ? <EyeOff className="h-4 w-4 text-slate-500" /> : <Eye className="h-4 w-4 text-slate-500" />}
-            </button>
-          </div>
-        </div>
-
-        {pwErr && (
-          <p className="text-sm text-rose-600" role="alert">
-            {pwErr}
-          </p>
-        )}
-
-        <div className="pt-2 flex justify-end gap-2">
-          <button
-            type="button"
-            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
-            onClick={() => { setPwOpen(false); setPwErr(""); }}
+      {mounted && pwOpen && createPortal(
+        <div className="fixed inset-0 z-[120] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40 z-[120]" onClick={() => setPwOpen(false)} />
+          <div
+            className="relative z-[121] w-[92%] max-w-md rounded-2xl bg-white p-6 ring-1 ring-slate-200 shadow-xl"
           >
-            キャンセル
-          </button>
+            <div className="mb-4">
+              <h3 className="text-lg font-semibold text-slate-900">パスワード変更</h3>
+              <p className="mt-1 text-sm text-slate-700">8〜128文字。変更は即時に有効になります。</p>
+            </div>
+            <form
+              className="space-y-4"
+              onSubmit={(e) => { e.preventDefault(); submitChange(); }}
+            >
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1" htmlFor="new-password">
+                  新しいパスワード
+                </label>
+                <div className="relative">
+                  <input
+                    id="new-password"
+                    type={show1 ? "text" : "password"}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none shadow-sm placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
+                    value={pw1}
+                    onChange={(e) => setPw1(e.target.value)}
+                    minLength={8}
+                    maxLength={128}
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    className="absolute inset-y-0 right-2 inline-flex items-center"
+                    aria-label={show1 ? "パスワードを隠す" : "パスワードを表示"}
+                    onClick={() => setShow1(v => !v)}
+                  >
+                    {show1 ? <EyeOff className="h-4 w-4 text-slate-500" /> : <Eye className="h-4 w-4 text-slate-500" />}
+                  </button>
+                </div>
+              </div>
 
-          {/* 二重で発火させる（配線確認用） */}
-          <button
-            type="submit"
-            className="rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:opacity-95"
-            onClick={() => { console.log("[pw] submit button clicked"); }}
-          >
-            変更する
-          </button>
-        </div>
-      </form>
-    </div>
-  </div>,
-  document.body
-)}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1" htmlFor="new-password-2">
+                  新しいパスワード（確認）
+                </label>
+                <div className="relative">
+                  <input
+                    id="new-password-2"
+                    type={show2 ? "text" : "password"}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none shadow-sm placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
+                    value={pw2}
+                    onChange={(e) => setPw2(e.target.value)}
+                    minLength={8}
+                    maxLength={128}
+                  />
+                  <button
+                    type="button"
+                    className="absolute inset-y-0 right-2 inline-flex items-center"
+                    aria-label={show2 ? "パスワードを隠す" : "パスワードを表示"}
+                    onClick={() => setShow2(v => !v)}
+                  >
+                    {show2 ? <EyeOff className="h-4 w-4 text-slate-500" /> : <Eye className="h-4 w-4 text-slate-500" />}
+                  </button>
+                </div>
+              </div>
 
+              {pwErr && <p className="text-sm text-rose-600" role="alert">{pwErr}</p>}
 
-
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
+                  onClick={() => { setPwOpen(false); setPwErr(""); }}
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:opacity-95"
+                >
+                  変更する
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>,
+        document.body
+      )}
 
       {/* 削除確認モーダル */}
       {mounted && delOpen && createPortal(
@@ -679,8 +686,21 @@ function ActionCell({
               </p>
             </div>
             <div className="mt-5 flex justify-end gap-2">
-              <button type="button" className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50" onClick={() => setDelOpen(false)}>キャンセル</button>
-              <button type="button" className={danger} onClick={() => { setDelOpen(false); onDelete(); }} disabled={disableDelete}>削除する</button>
+              <button
+                type="button"
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
+                onClick={() => setDelOpen(false)}
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                className={danger}
+                onClick={() => { setDelOpen(false); onDelete(); }}
+                disabled={disableDelete}
+              >
+                削除する
+              </button>
             </div>
           </div>
         </div>,
