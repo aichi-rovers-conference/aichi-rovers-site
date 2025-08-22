@@ -4,6 +4,10 @@ import { SignJWT, jwtVerify } from "jose";
 export const COOKIE_NAME = "arc_session";
 export type Role = "ADMIN" | "EDITOR" | "VIEWER" | string;
 
+// どのファイルがバンドルに載ったかを辿るための識別子（ログ用）
+export const AUTH_LIB_SOURCE =
+  (typeof import.meta !== "undefined" && (import.meta as any).url) || "unknown";
+
 // すべてのランタイムで同一値になるよう環境変数を読む
 const SECRET = new TextEncoder().encode(process.env.AUTH_SECRET || "dev-secret");
 export const ISS = process.env.AUTH_ISSUER ?? "https://aichirovers.com";
@@ -16,7 +20,6 @@ export type SessionClaims = {
   isSuper?: boolean;
   isActive?: boolean;
   remember?: boolean;
-  // 以下は jose が付与/検証する標準クレーム
   iat?: number;
   exp?: number;
   iss?: string;
@@ -36,8 +39,8 @@ export async function signSession(
     remember: !!payload.remember,
   })
     .setProtectedHeader({ alg: "HS256" })
-    .setIssuer(ISS)
-    .setAudience(AUD)
+    .setIssuer(ISS)          // ★ 必須
+    .setAudience(AUD)        // ★ 必須
     .setIssuedAt()
     .setExpirationTime(ttl)
     .sign(SECRET);
@@ -52,7 +55,7 @@ export async function verifyToken(token: string): Promise<SessionClaims> {
   return payload as SessionClaims;
 }
 
-// 後方互換のための別名
+// 後方互換
 export const verifySession = verifyToken;
 
 export async function verifyPassword(plain: string, hash: string) {

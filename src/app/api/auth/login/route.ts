@@ -1,9 +1,36 @@
 // app/api/auth/login/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "../../../../../lib/prisma";
-import { signSession, verifyPassword, COOKIE_NAME, type Role } from "@/lib/auth";
+import {
+  signSession,
+  verifyPassword,
+  COOKIE_NAME,
+  type Role,
+  ISS,
+  AUD,
+  AUTH_LIB_SOURCE,
+} from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
+
+// URL-safe Base64 → JSON（署名検証なしの“覗き”）
+function b64urlToJSON(b: string): any | null {
+  try {
+    let s = b.replace(/-/g, "+").replace(/_/g, "/");
+    if (s.length % 4) s += "=".repeat(4 - (s.length % 4));
+    const txt = Buffer.from(s, "base64").toString("utf-8");
+    return JSON.parse(txt);
+  } catch {
+    return null;
+  }
+}
+function peekJwt(token: string) {
+  const parts = (token || "").split(".");
+  const segs = parts.length;
+  const header = segs >= 1 ? b64urlToJSON(parts[0]) : null;
+  const payload = segs >= 2 ? b64urlToJSON(parts[1]) : null;
+  return { segs, header, payload };
+}
 
 function maskUser(u: string) {
   if (!u) return "(empty)";
@@ -17,7 +44,7 @@ export async function POST(req: Request) {
   const safeNext = validateNext(rawNext) || "/exec";
 
   const accept = (req.headers.get("accept") || "").toLowerCase();
-  const ctype  = (req.headers.get("content-type") || "").toLowerCase();
+  const ctype = (req.headers.get("content-type") || "").toLowerCase();
   const wantsJSON = accept.includes("application/json") || ctype.includes("application/json");
 
   try {
@@ -61,6 +88,9 @@ export async function POST(req: Request) {
       return fail(req, wantsJSON, safeNext, "invalid", 401);
     }
 
+    // --- サイン（iss/aud は lib/auth.ts で必ず付与される）---
+    console.log("[login] using auth lib: %s iss=%s aud=%s", AUTH_LIB_SOURCE, ISS, AUD);
+
     const payload = {
       id: user.id,
       username: user.username,
@@ -70,6 +100,11 @@ export async function POST(req: Request) {
       remember,
     };
     const token = await signSession(payload, remember ? "30d" : "8h");
+
+    // 発行したトークンの中身を覗いて iss/aud/exp を確認
+    const peek = peekJwt(token);
+    console.log("[login] token peek iss=%s aud=%s exp=%s segs=%d", peek.payload?.iss, peek.payload?.aud, peek.payload?.exp, peek.segs);
+
     const maxAge = remember ? 60 * 60 * 24 * 30 : 60 * 60 * 8;
 
     const isProd = process.env.NODE_ENV === "production";
@@ -102,8 +137,14 @@ export async function POST(req: Request) {
       if (isProd) res.cookies.set(legacy, "", { path: "/", maxAge: 0, domain: cookieDomain });
     }
 
-    console.log("[login] success user=%s remember=%s domain=%s redirect=%s json=%s",
-      maskUser(user.username), String(remember), isProd ? cookieDomain : "(none)", safeNext, String(wantsJSON));
+    console.log(
+      "[login] success user=%s remember=%s domain=%s redirect=%s json=%s",
+      maskUser(user.username),
+      String(remember),
+      isProd ? cookieDomain : "(none)",
+      safeNext,
+      String(wantsJSON)
+    );
 
     return res;
   } catch (e: any) {
