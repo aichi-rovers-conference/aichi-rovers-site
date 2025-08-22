@@ -1,44 +1,28 @@
-// app/login/page.tsx
-"use client";
-
-import { useState } from "react";
+// app/login/page.tsx  — サーバーコンポーネント（"use client" は不要）
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
 
-export default function ExecLoginPage() {
-  const router = useRouter();
-  const sp = useSearchParams();
-  const next = sp.get("next") || "/exec"; // 認証成功後の遷移先（デフォルト /exec）
+export default async function ExecLoginPage({
+  searchParams,
+}: {
+  // Next.js 15+ では searchParams は Promise
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const sp = await searchParams;
 
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [remember, setRemember] = useState(true); // 30日保持
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  // 値を文字列に丸めるヘルパ
+  const takeFirst = (v: string | string[] | undefined) =>
+    Array.isArray(v) ? v[0] : v;
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
-    setErr(null);
-    try {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({ username, password, remember }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setErr(data?.message || "ログインに失敗しました。");
-        setLoading(false);
-        return;
-      }
-      router.replace(next); // 成功 → /exec（または ?next=...）
-    } catch (e) {
-      setErr("ネットワークエラーが発生しました。");
-      setLoading(false);
-    }
-  }
+  // /login?next=/exec のような相対パスのみ許可（オープンリダイレクト防止）
+  const candidateNext = takeFirst(sp.next) || "/exec";
+  const next =
+    typeof candidateNext === "string" &&
+    candidateNext.startsWith("/") &&
+    !candidateNext.startsWith("//")
+      ? candidateNext
+      : "/exec";
+
+  const err = takeFirst(sp.error) || null;
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-white to-slate-50">
@@ -52,17 +36,21 @@ export default function ExecLoginPage() {
             </p>
           </header>
 
-          <form onSubmit={onSubmit} className="px-6 pb-6 pt-4 space-y-4">
+          {/* 通常のフォーム投稿。成功時は /api/auth/login が 303 で遷移 */}
+          <form
+            action={`/api/auth/login?next=${encodeURIComponent(next)}`}
+            method="post"
+            className="px-6 pb-6 pt-4 space-y-4"
+          >
             <div>
               <label className="block text-sm font-medium text-slate-700">
                 ユーザーID
               </label>
               <input
+                name="username"
                 type="text"
                 autoComplete="username"
                 required
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
                 className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none"
                 placeholder="username"
               />
@@ -73,11 +61,10 @@ export default function ExecLoginPage() {
                 パスワード
               </label>
               <input
+                name="password"
                 type="password"
                 autoComplete="current-password"
                 required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
                 className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none"
                 placeholder="••••••••"
               />
@@ -85,17 +72,20 @@ export default function ExecLoginPage() {
 
             <label className="flex items-center gap-2 text-sm text-slate-700 select-none">
               <input
+                name="remember"
                 type="checkbox"
-                checked={remember}
-                onChange={(e) => setRemember(e.target.checked)}
+                defaultChecked
                 className="h-4 w-4 rounded border-slate-300"
+                value="on"
               />
               ログイン状態を保持（30日）
             </label>
 
             {err && (
               <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {err}
+                {err === "missing" && "入力に不足があります。"}
+                {err === "invalid" && "ユーザーIDまたはパスワードが正しくありません。"}
+                {err !== "missing" && err !== "invalid" && "ログインに失敗しました。"}
               </div>
             )}
 
@@ -108,10 +98,9 @@ export default function ExecLoginPage() {
               </Link>
               <button
                 type="submit"
-                disabled={loading}
-                className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-60"
+                className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
               >
-                {loading ? "ログイン中…" : "ログイン"}
+                ログイン
               </button>
             </div>
           </form>
