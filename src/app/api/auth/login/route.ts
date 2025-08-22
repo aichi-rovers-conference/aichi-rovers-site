@@ -5,6 +5,13 @@ import { signSession, verifyPassword, COOKIE_NAME, type Role } from "@/lib/auth"
 
 export const dynamic = "force-dynamic";
 
+// 軽いマスク（username をログに出すとき用）
+function maskUser(u: string) {
+  if (!u) return "(empty)";
+  if (u.length <= 2) return u[0] + "*";
+  return u[0] + "*".repeat(Math.min(u.length - 2, 4)) + u.slice(-1);
+}
+
 export async function POST(req: Request) {
   const url = new URL(req.url);
   const rawNext = url.searchParams.get("next");
@@ -25,18 +32,20 @@ export async function POST(req: Request) {
       const rawUser = String(form.get("username") ?? form.get("id") ?? "");
       usernameNorm = rawUser.trim();
       password = String(form.get("password") ?? "").trim();
-      // チェック時のみキーが存在する
-      remember = form.has("remember");
+      remember = form.has("remember"); // チェック時のみキーが存在
+      console.log("[login] input=form user=%s remember=%s next=%s", maskUser(usernameNorm), String(remember), safeNext);
     } else {
       const body = await req.json().catch(() => ({}));
       const rawUser = String(body?.id ?? body?.username ?? "");
       usernameNorm = rawUser.trim();
       password = String(body?.password ?? "").trim();
       remember = Boolean(body?.remember ?? true);
+      console.log("[login] input=json user=%s remember=%s next=%s", maskUser(usernameNorm), String(remember), safeNext);
     }
 
     // ---- バリデーション ----
     if (!usernameNorm || !password || usernameNorm.length > 64 || password.length > 200) {
+      console.log("[login] validate: missing");
       return fail(req, wantsJSON, safeNext, "missing", 400);
     }
 
@@ -45,10 +54,17 @@ export async function POST(req: Request) {
       where: { username: { equals: usernameNorm, mode: "insensitive" } },
       select: { id: true, username: true, role: true, isActive: true, isSuper: true, passwordHash: true },
     });
-    if (!user || !user.isActive) return fail(req, wantsJSON, safeNext, "invalid", 401);
+
+    if (!user || !user.isActive) {
+      console.log("[login] auth: user-not-found-or-inactive user=%s", maskUser(usernameNorm));
+      return fail(req, wantsJSON, safeNext, "invalid", 401);
+    }
 
     const ok = await verifyPassword(password, user.passwordHash);
-    if (!ok) return fail(req, wantsJSON, safeNext, "invalid", 401);
+    if (!ok) {
+      console.log("[login] auth: password-mismatch user=%s", maskUser(usernameNorm));
+      return fail(req, wantsJSON, safeNext, "invalid", 401);
+    }
 
     // ---- セッション発行（iss/aud/remember 付き）----
     const payload = {
@@ -73,7 +89,7 @@ export async function POST(req: Request) {
 
     res.headers.set("Cache-Control", "no-store, max-age=0");
 
-    // ★ 先に旧Cookieを両バリアントで掃除（host-only / domain付き）
+    // 先に旧Cookieを両バリアントで掃除（host-only / domain付き）
     res.cookies.set(COOKIE_NAME, "", { path: "/", maxAge: 0 });
     if (isProd) {
       res.cookies.set(COOKIE_NAME, "", { path: "/", maxAge: 0, domain: cookieDomain });
@@ -97,8 +113,12 @@ export async function POST(req: Request) {
       }
     }
 
+    console.log("[login] success user=%s remember=%s domain=%s redirect=%s json=%s",
+      maskUser(user.username), String(remember), isProd ? cookieDomain : "(none)", safeNext, String(wantsJSON));
+
     return res;
   } catch (e: any) {
+    console.log("[login] error: %s", e?.message || String(e));
     if (wantsJSON) return jsonNoStore({ ok: false, error: "server", message: e?.message || String(e) }, 500);
     const back = new URL(`/login?error=server&next=${encodeURIComponent(safeNext)}`, req.url);
     const res = NextResponse.redirect(back, 303);
@@ -117,6 +137,7 @@ function fail(req: Request, wantsJSON: boolean, safeNext: string, code: "missing
   const back = new URL(`/login?error=${code}&next=${encodeURIComponent(safeNext)}`, req.url);
   const res = NextResponse.redirect(back, 303);
   res.headers.set("Cache-Control", "no-store, max-age=0");
+  console.log("[login] fail code=%s status=%d redirect=%s", code, status, back.pathname + back.search);
   return res;
 }
 
