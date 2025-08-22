@@ -213,9 +213,13 @@ export async function middleware(req: NextRequest) {
       if (!payload) {
   const back = new URL(`/login?next=${encodeURIComponent(pathname + search)}&auth=expired`, url);
   const res = NextResponse.redirect(back, 303);
-  // 旧Cookieを両バリアントで確実に削除
+
+  // ★ 端末に残っている古い/壊れたCookieを確実に消す（host-only / domain 付き 両方）
   res.cookies.set(COOKIE_NAME, "", { path: "/", maxAge: 0 });
-  if (isProd) res.cookies.set(COOKIE_NAME, "", { path: "/", maxAge: 0, domain: COOKIE_DOMAIN_DEFAULT });
+  if (isProd) {
+    res.cookies.set(COOKIE_NAME, "", { path: "/", maxAge: 0, domain: COOKIE_DOMAIN_DEFAULT });
+  }
+
   console.log("[mw][auth] all-invalid -> purge cookie & 303 %s", back.pathname + back.search);
   return res;
 }
