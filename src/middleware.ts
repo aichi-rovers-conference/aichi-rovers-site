@@ -4,7 +4,9 @@ import { jwtVerify, SignJWT } from "jose";
 
 /* ========= 基本定数 ========= */
 const COOKIE_NAME = "arc_session";
-const SECRET = new TextEncoder().encode(process.env.AUTH_SECRET || "dev-secret");
+const SECRET_RAW = process.env.AUTH_SECRET || "dev-secret";
+const SECRET = new TextEncoder().encode(SECRET_RAW);
+const SECRET_SRC = process.env.AUTH_SECRET ? "env" : "default"; // ★ 既定値かどうか
 const isProd = process.env.NODE_ENV === "production";
 
 /* JWT 厳格化（/api・lib・middlewareで必ず同値） */
@@ -95,6 +97,25 @@ function isStateChangingMethod(m: string) {
   return m === "POST" || m === "PUT" || m === "PATCH" || m === "DELETE";
 }
 
+/* URL-safe Base64 → JSON（署名検証なしの“覗き”） */
+function b64urlToJSON(b: string): any | null {
+  try {
+    let s = b.replace(/-/g, "+").replace(/_/g, "/");
+    if (s.length % 4) s += "=".repeat(4 - (s.length % 4));
+    const txt = atob(s);
+    return JSON.parse(txt);
+  } catch {
+    return null;
+  }
+}
+function peekJwt(token: string) {
+  const parts = (token || "").split(".");
+  const segs = parts.length;
+  const header = segs >= 1 ? b64urlToJSON(parts[0]) : null;
+  const payload = segs >= 2 ? b64urlToJSON(parts[1]) : null;
+  return { segs, header, payload };
+}
+
 /* /api の状態変更メソッドに対する SameSite CSRF ガード */
 function sameSiteCsrfGuard(req: NextRequest): NextResponse | null {
   const { pathname } = req.nextUrl;
@@ -161,8 +182,8 @@ export async function middleware(req: NextRequest) {
       // 現在見えている arc_session の本数と末尾
       const cookieVals = req.cookies.getAll(COOKIE_NAME).map(c => c.value);
       const tails = cookieVals.map(v => (v ?? "").slice(-12));
-      console.log("[mw][auth] path=%s host=%s cookies=%d tails=%j iss=%s aud=%s",
-        pathname, req.headers.get("host"), cookieVals.length, tails, ISS, AUD);
+      console.log("[mw][auth] path=%s host=%s cookies=%d tails=%j iss=%s aud=%s secret=%s",
+        pathname, req.headers.get("host"), cookieVals.length, tails, ISS, AUD, SECRET_SRC);
 
       if (cookieVals.length === 0) {
         const back = new URL(`/login?next=${encodeURIComponent(pathname + search)}&auth=required`, url);
@@ -182,7 +203,10 @@ export async function middleware(req: NextRequest) {
           payload = pl as unknown as Payload;
           break;
         } catch (err: any) {
-          console.log("[mw][auth] token verify fail: %s", err?.name || "VerifyError");
+          const peek = peekJwt(token);
+          const exp = peek.payload?.exp ? new Date(peek.payload.exp * 1000).toISOString() : null;
+          console.log("[mw][auth] verify fail name=%s msg=%s segs=%d peek.iss=%s peek.aud=%s peek.exp=%s",
+            err?.name || "Err", String(err?.message || ""), peek.segs, peek.payload?.iss, peek.payload?.aud, exp);
         }
       }
 
