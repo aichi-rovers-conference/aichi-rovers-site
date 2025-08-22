@@ -32,7 +32,7 @@ const PUBLIC_EXEC_PATHS = ["/exec/meetings/qr/show"];
 function isAlwaysPublic(pathname: string) {
   return (
     pathname === "/login" ||
-    pathname.startsWith("/api/auth/login") || // ★ ログインAPIは常に素通し
+    pathname.startsWith("/api/auth/login") ||
     pathname.startsWith("/p/") ||
     PUBLIC_EXEC_PATHS.some(p => pathname.startsWith(p))
   );
@@ -47,20 +47,6 @@ type Payload = {
   exp?: number;
 };
 
-async function verify(token: string): Promise<Payload | null> {
-  try {
-    const { payload } = await jwtVerify(token, SECRET, {
-      issuer: ISS,
-      audience: AUD,
-      clockTolerance: "60s",
-    });
-    return payload as unknown as Payload;
-  } catch {
-    return null;
-  }
-}
-
-/* Edge Runtime で動く nonce 生成（128bit） */
 function genNonce(): string {
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
@@ -100,10 +86,7 @@ function setSecurityHeaders(req: NextRequest, res: NextResponse, nonce: string) 
   res.headers.set("X-Content-Type-Options", "nosniff");
   res.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   res.headers.set("X-Frame-Options", "DENY");
-  res.headers.set(
-    "Permissions-Policy",
-    ["camera=()", "microphone=()", "geolocation=()", "payment=()", "usb=()", "bluetooth=()"].join(", ")
-  );
+  res.headers.set("Permissions-Policy", ["camera=()", "microphone=()", "geolocation=()", "payment=()", "usb=()", "bluetooth=()"].join(", "));
   res.headers.set("Cross-Origin-Opener-Policy", "same-origin");
   res.headers.set("Cross-Origin-Resource-Policy", "same-site");
 }
@@ -115,8 +98,7 @@ function isStateChangingMethod(m: string) {
 /* /api の状態変更メソッドに対する SameSite CSRF ガード */
 function sameSiteCsrfGuard(req: NextRequest): NextResponse | null {
   const { pathname } = req.nextUrl;
-
-  // ★ ログイン API は CSRF ガードの対象外（同一サイト form POST の相性問題回避）
+  // ログインAPIは対象外（フォームPOSTとの相性維持）
   if (pathname.startsWith("/api/auth/login")) return null;
 
   if (!(pathname.startsWith("/api") && isStateChangingMethod(req.method))) return null;
@@ -159,7 +141,7 @@ function httpsAndHostRedirect(req: NextRequest): NextResponse | null {
 
 /* ========= Middleware 本体 ========= */
 export async function middleware(req: NextRequest) {
-  // 1) HTTPS/ホスト正規化（★最上流）
+  // 1) HTTPS/ホスト正規化
   const hop = httpsAndHostRedirect(req);
   if (hop) return hop;
 
@@ -174,14 +156,30 @@ export async function middleware(req: NextRequest) {
   if (!isAlwaysPublic(pathname)) {
     const needsAuth = pathname.startsWith("/exec") || pathname.startsWith("/polls/admin");
     if (needsAuth) {
-      const token = req.cookies.get(COOKIE_NAME)?.value;
+      // ★ 同名Cookieが複数ある可能性を考慮して全件取得
+      const candidates = req.cookies.getAll(COOKIE_NAME).map(c => c.value);
 
-      if (!token) {
+      if (candidates.length === 0) {
         const back = new URL(`/login?next=${encodeURIComponent(pathname + search)}&auth=required`, url);
-        return NextResponse.redirect(back, 303); // ★ 303 に統一
+        return NextResponse.redirect(back, 303);
       }
 
-      const payload = await verify(token);
+      // ★ 新しいものから順に検証（最後に発行されたものほど後ろ）
+      let payload: Payload | null = null;
+      for (const token of candidates.slice().reverse()) {
+        try {
+          const { payload: pl } = await jwtVerify(token, SECRET, {
+            issuer: ISS,
+            audience: AUD,
+            clockTolerance: "60s",
+          });
+          payload = pl as unknown as Payload;
+          break;
+        } catch {
+          // 次の候補へ
+        }
+      }
+
       if (!payload) {
         const back = new URL(`/login?next=${encodeURIComponent(pathname + search)}&auth=expired`, url);
         return NextResponse.redirect(back, 303);
@@ -195,15 +193,13 @@ export async function middleware(req: NextRequest) {
       const res = NextResponse.next();
 
       if (needsRefresh) {
-        // remember が入っていないトークンもあるため、未定義時は「短期」扱いにするか、
-        // 運用に合わせて true/false を固定してください。
         const remember = !!payload.remember;
         const expStr = remember ? "30d" : "8h";
 
         const refreshed = await new SignJWT({
-          id: payload.id,
-          username: payload.username,
-          role: payload.role,
+          id: (payload as any).id,
+          username: (payload as any).username,
+          role: (payload as any).role,
           remember,
         })
           .setProtectedHeader({ alg: "HS256" })
@@ -213,7 +209,7 @@ export async function middleware(req: NextRequest) {
           .setExpirationTime(expStr)
           .sign(SECRET);
 
-        // ★ 本番は常に Domain を付与（apex/www 跨ぎで確実に届く）
+        // 本番は常に Domain 付与で上書き
         res.cookies.set(COOKIE_NAME, refreshed, {
           httpOnly: true,
           secure: isProd,
@@ -242,7 +238,6 @@ export async function middleware(req: NextRequest) {
 /* ========= 適用範囲 ========= */
 export const config = {
   matcher: [
-    // 静的資産を除外（必要に応じて拡張）
     "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|images|public|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|css|js|map)).*)",
   ],
 };
