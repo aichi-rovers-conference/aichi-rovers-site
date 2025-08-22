@@ -1,4 +1,3 @@
-// components/ArcHeader.tsx
 "use client";
 
 import Link from "next/link";
@@ -10,17 +9,20 @@ export default function ArcHeader() {
   const pathname = usePathname() || "/";
   const router = useRouter();
 
-  const isExecRoot = pathname === "/exec" || pathname === "/exec/";
+  const isExecRoot =
+    pathname === "/exec" || pathname === "/exec/";
 
   const goBack = () => {
     if (isExecRoot) {
-      router.push("/");
+      // ★ ミドルウェアの自動リダイレクトをスキップするフラグを付けてホームへ
+      router.push("/?home=1");
       return;
     }
     if (typeof window !== "undefined" && window.history.length > 1) {
       router.back();
     } else {
-      router.push("/");
+      // 直にトップへ戻る場合もフラグ付きで
+      router.push("/?home=1");
     }
   };
 
@@ -62,7 +64,6 @@ export default function ArcHeader() {
               priority
               draggable={false}
             />
-            {/* モバイル: ARC / sm以上: フル表記 */}
             <span className="font-extrabold tracking-wide text-[15px] sm:hidden">
               ARC
             </span>
