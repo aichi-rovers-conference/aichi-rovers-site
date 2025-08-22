@@ -25,16 +25,12 @@ const fromDbLayout = (v: any): "grid" | "slideshow" | null => {
   return s === "slideshow" ? "slideshow" : s === "grid" ? "grid" : null;
 };
 
-// Next.js の仕様で params が Promise の場合があるため、ユニオンで受けて await する
 type Params = { slug: string };
 
-export async function GET(
-  _req: Request,
-  ctx: { params: Promise<Params> } | { params: Params }
-) {
+// ---- GET ----
+export async function GET(_req: Request, { params }: { params: Params }) {
   try {
-    const { slug: raw } = await (ctx.params as any); // ← ここがポイント
-    const slug = decodeURIComponent(raw ?? "");
+    const slug = decodeURIComponent(params.slug ?? "");
     if (!slug) {
       return NextResponse.json({ ok: false, message: "Bad request" }, { status: 400 });
     }
@@ -76,13 +72,10 @@ export async function GET(
   }
 }
 
-export async function PUT(
-  req: Request,
-  ctx: { params: Promise<Params> } | { params: Params }
-) {
+// ---- PUT ----
+export async function PUT(req: Request, { params }: { params: Params }) {
   try {
-    const { slug: raw } = await (ctx.params as any); // ← ここがポイント
-    const slug = decodeURIComponent(raw ?? "");
+    const slug = decodeURIComponent(params.slug ?? "");
     if (!slug) {
       return NextResponse.json({ ok: false, message: "Bad request" }, { status: 400 });
     }
