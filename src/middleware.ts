@@ -98,9 +98,7 @@ function isStateChangingMethod(m: string) {
 /* /api の状態変更メソッドに対する SameSite CSRF ガード */
 function sameSiteCsrfGuard(req: NextRequest): NextResponse | null {
   const { pathname } = req.nextUrl;
-  // ログインAPIは対象外（フォームPOSTとの相性維持）
-  if (pathname.startsWith("/api/auth/login")) return null;
-
+  if (pathname.startsWith("/api/auth/login")) return null; // ログインAPIは対象外
   if (!(pathname.startsWith("/api") && isStateChangingMethod(req.method))) return null;
 
   const origin = req.headers.get("origin");
@@ -114,6 +112,8 @@ function sameSiteCsrfGuard(req: NextRequest): NextResponse | null {
   const fromSameSite = sfs === "" || sfs === "same-origin" || sfs === "same-site";
 
   if (fromAllowedOrigin || fromSameSite) return null;
+
+  console.log("[mw][csrf] blocked path=%s origin=%s referer=%s sfs=%s", pathname, origin, referer, sfs);
   return new NextResponse("Forbidden (CSRF)", { status: 403 });
 }
 
@@ -127,11 +127,13 @@ function httpsAndHostRedirect(req: NextRequest): NextResponse | null {
   if (proto && proto !== "https") {
     const url = new URL(req.url);
     url.protocol = "https:";
+    console.log("[mw][redirect] force-https host=%s path=%s", host, url.pathname);
     return NextResponse.redirect(url, 308);
   }
 
   if (host && !ALLOWED_HOSTS.has(host)) {
     const url = new URL(req.url);
+    console.log("[mw][redirect] host-normalize from=%s to=%s path=%s", host, CANONICAL_HOST, url.pathname);
     url.host = CANONICAL_HOST;
     return NextResponse.redirect(url, 308);
   }
@@ -156,17 +158,21 @@ export async function middleware(req: NextRequest) {
   if (!isAlwaysPublic(pathname)) {
     const needsAuth = pathname.startsWith("/exec") || pathname.startsWith("/polls/admin");
     if (needsAuth) {
-      // ★ 同名Cookieが複数ある可能性を考慮して全件取得
-      const candidates = req.cookies.getAll(COOKIE_NAME).map(c => c.value);
+      // 現在見えている arc_session の本数と末尾
+      const cookieVals = req.cookies.getAll(COOKIE_NAME).map(c => c.value);
+      const tails = cookieVals.map(v => (v ?? "").slice(-12));
+      console.log("[mw][auth] path=%s host=%s cookies=%d tails=%j iss=%s aud=%s",
+        pathname, req.headers.get("host"), cookieVals.length, tails, ISS, AUD);
 
-      if (candidates.length === 0) {
+      if (cookieVals.length === 0) {
         const back = new URL(`/login?next=${encodeURIComponent(pathname + search)}&auth=required`, url);
+        console.log("[mw][auth] no-cookie -> 303 %s", back.pathname + back.search);
         return NextResponse.redirect(back, 303);
       }
 
-      // ★ 新しいものから順に検証（最後に発行されたものほど後ろ）
+      // 新しいものから順に検証
       let payload: Payload | null = null;
-      for (const token of candidates.slice().reverse()) {
+      for (const token of cookieVals.slice().reverse()) {
         try {
           const { payload: pl } = await jwtVerify(token, SECRET, {
             issuer: ISS,
@@ -175,17 +181,18 @@ export async function middleware(req: NextRequest) {
           });
           payload = pl as unknown as Payload;
           break;
-        } catch {
-          // 次の候補へ
+        } catch (err: any) {
+          console.log("[mw][auth] token verify fail: %s", err?.name || "VerifyError");
         }
       }
 
       if (!payload) {
         const back = new URL(`/login?next=${encodeURIComponent(pathname + search)}&auth=expired`, url);
+        console.log("[mw][auth] all-invalid -> 303 %s", back.pathname + back.search);
         return NextResponse.redirect(back, 303);
       }
 
-      // 4) スライディング延長（残り < 1日）
+      // 残り < 1日ならスライディング延長
       const nowSec = Math.floor(Date.now() / 1000);
       const expSec = Number(payload.exp || 0);
       const needsRefresh = expSec > 0 && expSec - nowSec < 60 * 60 * 24;
@@ -209,7 +216,6 @@ export async function middleware(req: NextRequest) {
           .setExpirationTime(expStr)
           .sign(SECRET);
 
-        // 本番は常に Domain 付与で上書き
         res.cookies.set(COOKIE_NAME, refreshed, {
           httpOnly: true,
           secure: isProd,
@@ -218,11 +224,14 @@ export async function middleware(req: NextRequest) {
           maxAge: remember ? 60 * 60 * 24 * 30 : 60 * 60 * 8,
           ...(isProd ? { domain: COOKIE_DOMAIN_DEFAULT } : {}),
         });
+
+        console.log("[mw][auth] sliding-refresh remember=%s exp=%s", String(remember), expStr);
       }
 
       const nonce = genNonce();
       res.headers.set("x-csp-nonce", nonce);
       setSecurityHeaders(req, res, nonce);
+      console.log("[mw][pass] %s", pathname);
       return res;
     }
   }

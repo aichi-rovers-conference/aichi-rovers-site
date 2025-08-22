@@ -5,7 +5,7 @@ import { signSession, verifyPassword, COOKIE_NAME, type Role } from "@/lib/auth"
 
 export const dynamic = "force-dynamic";
 
-// 軽いマスク（username をログに出すとき用）
+// 軽いマスク（ログ用）
 function maskUser(u: string) {
   if (!u) return "(empty)";
   if (u.length <= 2) return u[0] + "*";
@@ -85,7 +85,11 @@ export async function POST(req: Request) {
 
     const res = wantsJSON
       ? jsonNoStore({ ok: true, next: safeNext }, 200)
-      : NextResponse.redirect(new URL(safeNext, req.url), 303);
+      : NextResponse.redirect(
+          // 念のため本番は常に正規ホストへ絶対URLでリダイレクト
+          new URL(safeNext, isProd ? `https://${CANONICAL_HOST}` : req.url),
+          303
+        );
 
     res.headers.set("Cache-Control", "no-store, max-age=0");
 
