@@ -211,10 +211,14 @@ export async function middleware(req: NextRequest) {
       }
 
       if (!payload) {
-        const back = new URL(`/login?next=${encodeURIComponent(pathname + search)}&auth=expired`, url);
-        console.log("[mw][auth] all-invalid -> 303 %s", back.pathname + back.search);
-        return NextResponse.redirect(back, 303);
-      }
+  const back = new URL(`/login?next=${encodeURIComponent(pathname + search)}&auth=expired`, url);
+  const res = NextResponse.redirect(back, 303);
+  // 旧Cookieを両バリアントで確実に削除
+  res.cookies.set(COOKIE_NAME, "", { path: "/", maxAge: 0 });
+  if (isProd) res.cookies.set(COOKIE_NAME, "", { path: "/", maxAge: 0, domain: COOKIE_DOMAIN_DEFAULT });
+  console.log("[mw][auth] all-invalid -> purge cookie & 303 %s", back.pathname + back.search);
+  return res;
+}
 
       // 残り < 1日ならスライディング延長
       const nowSec = Math.floor(Date.now() / 1000);

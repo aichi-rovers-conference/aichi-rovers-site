@@ -1,5 +1,7 @@
-// app/login/page.tsx  — サーバーコンポーネント（"use client" は不要）
+// app/login/page.tsx — Server Component
 import Link from "next/link";
+
+export const dynamic = "force-dynamic"; // キャッシュ回避（常に最新の検索パラメータを読む）
 
 export default async function ExecLoginPage({
   searchParams,
@@ -22,7 +24,16 @@ export default async function ExecLoginPage({
       ? candidateNext
       : "/exec";
 
-  const err = takeFirst(sp.error) || null;
+  // エラーメッセージ（?error=xxx / ?auth=expired|required 対応）
+  const errParam = takeFirst(sp.error) || null;
+  const authParam = takeFirst(sp.auth) || null;
+
+  let errorText: string | null = null;
+  if (errParam === "missing") errorText = "入力に不足があります。";
+  else if (errParam === "invalid") errorText = "ユーザーIDまたはパスワードが正しくありません。";
+  else if (errParam && errParam !== "missing" && errParam !== "invalid") errorText = "ログインに失敗しました。";
+  if (!errorText && authParam === "expired") errorText = "ログインの有効期限が切れました。もう一度サインインしてください。";
+  if (!errorText && authParam === "required") errorText = "サインインが必要です。アカウントでログインしてください。";
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-white to-slate-50">
@@ -36,10 +47,11 @@ export default async function ExecLoginPage({
             </p>
           </header>
 
-          {/* 通常のフォーム投稿。成功時は /api/auth/login が 303 で遷移 */}
+          {/* 通常のフォーム投稿。成功時は /api/auth/login が Set-Cookie → 303 で遷移 */}
           <form
             action={`/api/auth/login?next=${encodeURIComponent(next)}`}
             method="post"
+            encType="application/x-www-form-urlencoded"
             className="px-6 pb-6 pt-4 space-y-4"
           >
             <div>
@@ -51,6 +63,10 @@ export default async function ExecLoginPage({
                 type="text"
                 autoComplete="username"
                 required
+                // モバイルでの誤変換防止
+                autoCapitalize="none"
+                autoCorrect="off"
+                inputMode="text"
                 className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none"
                 placeholder="username"
               />
@@ -65,6 +81,8 @@ export default async function ExecLoginPage({
                 type="password"
                 autoComplete="current-password"
                 required
+                autoCapitalize="none"
+                autoCorrect="off"
                 className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none"
                 placeholder="••••••••"
               />
@@ -81,11 +99,9 @@ export default async function ExecLoginPage({
               ログイン状態を保持（30日）
             </label>
 
-            {err && (
+            {errorText && (
               <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {err === "missing" && "入力に不足があります。"}
-                {err === "invalid" && "ユーザーIDまたはパスワードが正しくありません。"}
-                {err !== "missing" && err !== "invalid" && "ログインに失敗しました。"}
+                {errorText}
               </div>
             )}
 
