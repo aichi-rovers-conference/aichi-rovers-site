@@ -37,11 +37,12 @@ function fmtDate(d: string) {
   return `${y}-${m}-${day}`;
 }
 
-function NewBadge() {
+/* ✅ バッジを任意の位置に置けるように */
+function NewBadge({ className = "" }: { className?: string }) {
   return (
-    <div className="absolute left-3 top-3 z-30">
-      <div className="h-9 w-9 rounded-full bg-red-600 text-white grid place-items-center shadow-lg">
-        <span className="text-[10px] font-extrabold tracking-wide">NEW</span>
+    <div className={`absolute z-30 pointer-events-none ${className}`}>
+      <div className="h-9 w-9 sm:h-10 sm:w-10 rounded-full bg-red-600 text-white grid place-items-center shadow-lg">
+        <span className="text-[10px] sm:text-xs font-extrabold tracking-wide">NEW</span>
       </div>
     </div>
   );
@@ -52,7 +53,8 @@ function LatestHighlight({ item }: { item: MeetingReport }) {
   const isExternal = /^https?:\/\//i.test(link);
   return (
     <div className="relative rounded-2xl border border-gray-200 bg-white shadow-sm p-4 sm:p-5 overflow-hidden overflow-x-clip">
-      <NewBadge />
+      {/* ❌ ここにあった <NewBadge /> は削除 */}
+
       <div className="flex items-center justify-between mb-2">
         <h3 className="font-bold text-gray-900 leading-tight" style={{ fontSize: "clamp(18px,3.8vw,24px)" }}>
           最新のレポート
@@ -63,6 +65,9 @@ function LatestHighlight({ item }: { item: MeetingReport }) {
       <div className="grid grid-cols-1 md:grid-cols-[1.4fr,1fr] gap-5 sm:gap-6 items-start">
         {/* 左：動画 or サムネイル */}
         <div className="relative w-full">
+          {/* ✅ バッジをメディア領域の左上へ移動 */}
+          <NewBadge className="left-3 top-3 sm:left-4 sm:top-4" />
+
           {item.youtubeId ? (
             <div className="aspect-video w-full rounded-xl overflow-hidden border bg-black/5">
               <iframe
