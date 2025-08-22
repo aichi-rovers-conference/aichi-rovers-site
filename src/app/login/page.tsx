@@ -1,127 +1,167 @@
-// app/login/page.tsx — Server Component
-import Link from "next/link";
+// src/app/api/auth/login/route.ts
+import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import {
+  signSession,
+  verifyPassword,
+  COOKIE_NAME,
+  type Role,
+  ISS,
+  AUD,
+} from "@/lib/auth";
 
-export const dynamic = "force-dynamic"; // キャッシュ回避（常に最新の検索パラメータを読む）
+export const dynamic = "force-dynamic";
 
-export default async function ExecLoginPage({
-  searchParams,
-}: {
-  // Next.js 15+ では searchParams は Promise
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
-  const sp = await searchParams;
+// URL-safe Base64 → JSON（署名検証なし）
+function b64urlToJSON(b: string): any | null {
+  try {
+    let s = b.replace(/-/g, "+").replace(/_/g, "/");
+    if (s.length % 4) s += "=".repeat(4 - (s.length % 4));
+    const txt = Buffer.from(s, "base64").toString("utf-8");
+    return JSON.parse(txt);
+  } catch { return null; }
+}
+function peekJwt(t: string){
+  const p = (t || "").split(".");
+  return { segs: p.length, payload: b64urlToJSON(p[1]) };
+}
+const maskUser = (u: string) => !u ? "(empty)" : (u.length <= 2 ? u[0] + "*" : u[0] + "*".repeat(Math.min(u.length - 2, 4)) + u.slice(-1));
 
-  // 値を文字列に丸めるヘルパ
-  const takeFirst = (v: string | string[] | undefined) =>
-    Array.isArray(v) ? v[0] : v;
+// フォームPOST時に使う：200で小さなHTMLを返し、JSで遷移（Cookie定着を安定化）
+function htmlRedirect(next: string) {
+  const escaped = next.replace(/"/g, '&quot;');
+  const body = `<!doctype html>
+<html lang="ja"><meta charset="utf-8">
+<meta http-equiv="refresh" content="0;url=${escaped}">
+<title>Signing in…</title>
+<p>サインイン中…遷移しない場合は <a href="${escaped}">こちら</a></p>
+<script>location.replace("${escaped}")</script>
+</html>`;
+  return new Response(body, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store, max-age=0",
+    },
+  });
+}
 
-  // /login?next=/exec のような相対パスのみ許可（オープンリダイレクト防止）
-  const candidateNext = takeFirst(sp.next) || "/exec";
-  const next =
-    typeof candidateNext === "string" &&
-    candidateNext.startsWith("/") &&
-    !candidateNext.startsWith("//")
-      ? candidateNext
+export async function POST(req: Request) {
+  const url = new URL(req.url);
+  const rawNext = url.searchParams.get("next");
+  const safeNext =
+    rawNext && rawNext.startsWith("/") && !rawNext.startsWith("//")
+      ? rawNext
       : "/exec";
 
-  // エラーメッセージ（?error=xxx / ?auth=expired|required 対応）
-  const errParam = takeFirst(sp.error) || null;
-  const authParam = takeFirst(sp.auth) || null;
+  const accept = (req.headers.get("accept") || "").toLowerCase();
+  const ctype  = (req.headers.get("content-type") || "").toLowerCase();
+  const isForm = ctype.includes("application/x-www-form-urlencoded") || ctype.includes("multipart/form-data");
+  const wantsJSON = accept.includes("application/json") || ctype.includes("application/json");
 
-  let errorText: string | null = null;
-  if (errParam === "missing") errorText = "入力に不足があります。";
-  else if (errParam === "invalid") errorText = "ユーザーIDまたはパスワードが正しくありません。";
-  else if (errParam && errParam !== "missing" && errParam !== "invalid") errorText = "ログインに失敗しました。";
-  if (!errorText && authParam === "expired") errorText = "ログインの有効期限が切れました。もう一度サインインしてください。";
-  if (!errorText && authParam === "required") errorText = "サインインが必要です。アカウントでログインしてください。";
+  try {
+    // 入力
+    let username = "", password = "", remember = true;
+    if (isForm) {
+      const form = await req.formData();
+      username = String(form.get("username") ?? form.get("id") ?? "").trim();
+      password = String(form.get("password") ?? "").trim();
+      remember = form.has("remember");
+      console.log("[login] input=form user=%s remember=%s next=%s", maskUser(username), String(remember), safeNext);
+    } else {
+      const body = await req.json().catch(() => ({}));
+      username = String(body?.id ?? body?.username ?? "").trim();
+      password = String(body?.password ?? "").trim();
+      remember = Boolean(body?.remember ?? true);
+      console.log("[login] input=json user=%s remember=%s next=%s", maskUser(username), String(remember), safeNext);
+    }
 
-  return (
-    <main className="min-h-screen bg-gradient-to-b from-white to-slate-50">
-      <div className="h-2 w-full bg-gradient-to-r from-violet-400 via-fuchsia-400 to-indigo-400" />
-      <section className="mx-auto max-w-md px-4 py-10">
-        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <header className="px-6 pt-6">
-            <h1 className="text-2xl font-bold text-slate-900">運営委員ログイン</h1>
-            <p className="mt-1 text-sm text-slate-600">
-              ARC運営委員用アカウントでサインインしてください。
-            </p>
-          </header>
+    if (!username || !password || username.length > 64 || password.length > 200) {
+      return fail(req, wantsJSON, safeNext, "missing", 400, isForm);
+    }
 
-          {/* 通常のフォーム投稿。成功時は /api/auth/login が Set-Cookie → 303 で遷移 */}
-          <form
-            action={`/api/auth/login?next=${encodeURIComponent(next)}`}
-            method="post"
-            encType="application/x-www-form-urlencoded"
-            className="px-6 pb-6 pt-4 space-y-4"
-          >
-            <div>
-              <label className="block text-sm font-medium text-slate-700">
-                ユーザーID
-              </label>
-              <input
-                name="username"
-                type="text"
-                autoComplete="username"
-                required
-                // モバイルでの誤変換防止
-                autoCapitalize="none"
-                autoCorrect="off"
-                inputMode="text"
-                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none"
-                placeholder="username"
-              />
-            </div>
+    // 認証
+    const user = await prisma.user.findFirst({
+      where: { username: { equals: username, mode: "insensitive" } },
+      select: { id: true, username: true, role: true, isActive: true, isSuper: true, passwordHash: true },
+    });
+    if (!user || !user.isActive) return fail(req, wantsJSON, safeNext, "invalid", 401, isForm);
 
-            <div>
-              <label className="block text-sm font-medium text-slate-700">
-                パスワード
-              </label>
-              <input
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                required
-                autoCapitalize="none"
-                autoCorrect="off"
-                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none"
-                placeholder="••••••••"
-              />
-            </div>
+    const ok = await verifyPassword(password, user.passwordHash);
+    if (!ok) return fail(req, wantsJSON, safeNext, "invalid", 401, isForm);
 
-            <label className="flex items-center gap-2 text-sm text-slate-700 select-none">
-              <input
-                name="remember"
-                type="checkbox"
-                defaultChecked
-                className="h-4 w-4 rounded border-slate-300"
-                value="on"
-              />
-              ログイン状態を保持（30日）
-            </label>
+    // セッション発行（iss/aud 付き）
+    const token = await signSession({
+      id: user.id,
+      username: user.username,
+      role: user.role as Role,
+      isSuper: user.isSuper,
+      isActive: user.isActive,
+      remember,
+    }, remember ? "30d" : "8h");
 
-            {errorText && (
-              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {errorText}
-              </div>
-            )}
+    // 発行payloadを覗くだけ（署名検証なし）
+    const peek = peekJwt(token);
+    console.log("[login] token peek iss=%s aud=%s exp=%s segs=%d",
+      peek.payload?.iss, peek.payload?.aud, peek.payload?.exp, peek.segs);
 
-            <div className="flex items-center justify-between pt-2">
-              <Link
-                href="/"
-                className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-              >
-                キャンセル
-              </Link>
-              <button
-                type="submit"
-                className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
-              >
-                ログイン
-              </button>
-            </div>
-          </form>
-        </div>
-      </section>
-    </main>
-  );
+    const isProd = process.env.NODE_ENV === "production";
+    const CANONICAL_HOST = process.env.CANONICAL_HOST ?? "aichirovers.com";
+    const cookieDomain = process.env.COOKIE_DOMAIN ?? `.${CANONICAL_HOST}`;
+    const maxAge = remember ? 60 * 60 * 24 * 30 : 60 * 60 * 8;
+
+    // レスポンス（フォーム→200HTML, JSON→200 JSON）
+    const res = isForm
+      ? new NextResponse(htmlRedirect(safeNext).body, {
+          status: 200,
+          headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store, max-age=0" },
+        })
+      : NextResponse.json({ ok: true, next: safeNext }, { status: 200 });
+
+    // 旧Cookie掃除（host-only / domain付き）
+    res.cookies.set(COOKIE_NAME, "", { path: "/", maxAge: 0 });
+    if (isProd) res.cookies.set(COOKIE_NAME, "", { path: "/", maxAge: 0, domain: cookieDomain });
+
+    // 新Cookie（本番は Domain 付与）
+    res.cookies.set(COOKIE_NAME, token, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: "lax",
+      path: "/",
+      maxAge,
+      ...(isProd ? { domain: cookieDomain } : {}),
+    });
+
+    // レガシー掃除
+    for (const legacy of ["admin", "admin_id", "admin_role", "session"]) {
+      res.cookies.set(legacy, "", { path: "/", maxAge: 0 });
+      if (isProd) res.cookies.set(legacy, "", { path: "/", maxAge: 0, domain: cookieDomain });
+    }
+
+    console.log("[login] success user=%s remember=%s domain=%s next=%s mode=%s",
+      maskUser(user.username), String(remember), isProd ? cookieDomain : "(none)", safeNext, isForm ? "form-200" : "json-200");
+
+    return res;
+  } catch (e: any) {
+    console.log("[login] error: %s", e?.message || String(e));
+    return fail(req, wantsJSON, "/exec", "server", 500, isForm);
+  }
+}
+
+function fail(req: Request, wantsJSON: boolean, next: string, code: "missing" | "invalid" | "server", status: number, isForm: boolean) {
+  if (wantsJSON) {
+    const r = NextResponse.json({ ok: false, error: code }, { status });
+    r.headers.set("Cache-Control", "no-store, max-age=0");
+    return r;
+  }
+  if (isForm) {
+    const u = new URL(req.url);
+    const back = `/login?error=${code}&next=${encodeURIComponent(next)}`;
+    return htmlRedirect(back);
+  }
+  const u = new URL(req.url);
+  const back = new URL(`/login?error=${code}&next=${encodeURIComponent(next)}`, u);
+  const r = NextResponse.redirect(back, 303);
+  r.headers.set("Cache-Control", "no-store, max-age=0");
+  return r;
 }
