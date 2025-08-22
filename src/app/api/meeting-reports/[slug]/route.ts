@@ -25,12 +25,18 @@ const fromDbLayout = (v: any): "grid" | "slideshow" | null => {
   return s === "slideshow" ? "slideshow" : s === "grid" ? "grid" : null;
 };
 
-type Params = { slug: string };
+// 共通：ctx から params を安全に取り出す（Next の型に依存しない）
+function getParams(ctx: unknown): { slug: string } {
+  const { params } = (ctx as { params?: unknown }) ?? {};
+  if (!params || typeof params !== "object" || params === null) return { slug: "" };
+  const slug = decodeURIComponent(String((params as Record<string, unknown>).slug ?? ""));
+  return { slug };
+}
 
 // ---- GET ----
-export async function GET(_req: Request, { params }: { params: Params }) {
+export async function GET(_req: Request, ctx: unknown) {
   try {
-    const slug = decodeURIComponent(params.slug ?? "");
+    const { slug } = getParams(ctx);
     if (!slug) {
       return NextResponse.json({ ok: false, message: "Bad request" }, { status: 400 });
     }
@@ -59,13 +65,13 @@ export async function GET(_req: Request, { params }: { params: Params }) {
       return NextResponse.json({ ok: false, message: "Not found" }, { status: 404 });
     }
 
-    // enum を UI 値へ寄せて返却
-    const data = {
-      ...report,
-      pageGalleryLayout: fromDbLayout(report.pageGalleryLayout),
-    };
-
-    return NextResponse.json({ ok: true, data });
+    return NextResponse.json({
+      ok: true,
+      data: {
+        ...report,
+        pageGalleryLayout: fromDbLayout(report.pageGalleryLayout),
+      },
+    });
   } catch (err) {
     console.error("[GET /api/meeting-reports/[slug]]", err);
     return NextResponse.json({ ok: false, message: "Internal error" }, { status: 500 });
@@ -73,9 +79,9 @@ export async function GET(_req: Request, { params }: { params: Params }) {
 }
 
 // ---- PUT ----
-export async function PUT(req: Request, { params }: { params: Params }) {
+export async function PUT(req: Request, ctx: unknown) {
   try {
-    const slug = decodeURIComponent(params.slug ?? "");
+    const { slug } = getParams(ctx);
     if (!slug) {
       return NextResponse.json({ ok: false, message: "Bad request" }, { status: 400 });
     }
@@ -99,8 +105,8 @@ export async function PUT(req: Request, { params }: { params: Params }) {
         youtubeId: body.youtubeId ?? null,
         isPublished: !!body.isPublished,
         pageGallery: body.pageGallery ?? [],
-        groups, // ← 子ギャラリーの layout も JSON に含まれて保存
-        pageGalleryLayout: { set: toDbLayout(body.pageGalleryLayout) }, // ← enum を安全にセット
+        groups, // 子ギャラリーの layout も JSON に含まれて保存
+        pageGalleryLayout: { set: toDbLayout(body.pageGalleryLayout) }, // enum を安全にセット
       },
       select: {
         id: true,
