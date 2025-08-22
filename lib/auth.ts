@@ -4,11 +4,10 @@ import { SignJWT, jwtVerify } from "jose";
 export const COOKIE_NAME = "arc_session";
 export type Role = "ADMIN" | "EDITOR" | "VIEWER" | string;
 
-// どのファイルがバンドルに載ったかを辿るための識別子（ログ用）
+// どのファイルが実際に読み込まれているか識別するためのラベル
 export const AUTH_LIB_SOURCE =
   (typeof import.meta !== "undefined" && (import.meta as any).url) || "unknown";
 
-// すべてのランタイムで同一値になるよう環境変数を読む
 const SECRET = new TextEncoder().encode(process.env.AUTH_SECRET || "dev-secret");
 export const ISS = process.env.AUTH_ISSUER ?? "https://aichirovers.com";
 export const AUD = process.env.AUTH_AUDIENCE ?? "arc-web";
@@ -28,7 +27,7 @@ export type SessionClaims = {
 
 export async function signSession(
   payload: Omit<SessionClaims, "iat" | "exp" | "iss" | "aud">,
-  ttl: string // 例: "30d" | "8h"
+  ttl: string
 ): Promise<string> {
   return await new SignJWT({
     id: payload.id,
@@ -55,10 +54,9 @@ export async function verifyToken(token: string): Promise<SessionClaims> {
   return payload as SessionClaims;
 }
 
-// 後方互換
 export const verifySession = verifyToken;
 
 export async function verifyPassword(plain: string, hash: string) {
-  const bcrypt = await import("bcryptjs").then((m) => m.default || m);
+  const bcrypt = await import("bcryptjs").then(m => m.default || m);
   return bcrypt.compare(plain, hash);
 }
