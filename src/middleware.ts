@@ -15,7 +15,16 @@ const COOKIE_DOMAIN_DEFAULT = process.env.COOKIE_DOMAIN ?? `.${CANONICAL_HOST}`;
 
 const PUBLIC_EXEC_PATHS = ["/exec/meetings/qr/show"];
 const ALWAYS_PUBLIC = (p: string) =>
-  p === "/login" || p.startsWith("/api/auth/login") || p.startsWith("/p/") || PUBLIC_EXEC_PATHS.some(s => p.startsWith(s));
+  p.startsWith("/api/auth/login") ||
+  p.startsWith("/p/") ||
+  PUBLIC_EXEC_PATHS.some((s) => p.startsWith(s)) ||
+  p === "/login" ||
+  p === "/";
+
+function validateNext(n?: string | null) {
+  if (!n) return null;
+  return n.startsWith("/") && !n.startsWith("//") ? n : null;
+}
 
 export async function middleware(req: NextRequest) {
   // 1) HTTPS/ホスト正規化（本番）
@@ -37,12 +46,35 @@ export async function middleware(req: NextRequest) {
   const url = req.nextUrl;
   const { pathname, search } = url;
 
-  // 2) 認可（/exec, /polls/admin）
+  // 2) 「既にログイン済みなら /login と / から自動で /exec に飛ばす」
+  if (pathname === "/login" || pathname === "/") {
+    const bypass = url.searchParams.get("home") === "1" || url.searchParams.get("noexec") === "1";
+    if (!bypass) {
+      const tokens = req.cookies.getAll(COOKIE_NAME).map(c => c.value).slice().reverse();
+      for (const token of tokens) {
+        try {
+          const { payload } = await jwtVerify(token, SECRET, {
+            issuer: ISS,
+            audience: AUD,
+            clockTolerance: "60s",
+          });
+          // 有効セッション → /exec（?next 優先）
+          const paramNext = url.searchParams.get("next");
+          const dest = validateNext(paramNext) || "/exec";
+          const to = new URL(dest, url);
+          return NextResponse.redirect(to, 303);
+        } catch {
+          // 検証失敗なら素通し（ログイン画面やホームを表示）
+        }
+      }
+    }
+  }
+
+  // 3) 認可（/exec, /polls/admin）
   if (!ALWAYS_PUBLIC(pathname)) {
     const needsAuth = pathname.startsWith("/exec") || pathname.startsWith("/polls/admin");
     if (needsAuth) {
-      // 新Cookie名のみ採用（旧名は無視）。複数あれば新しい順に検証
-      const tokens = req.cookies.getAll(COOKIE_NAME).map(c => c.value).slice().reverse();
+      const tokens = req.cookies.getAll(COOKIE_NAME).map((c) => c.value).slice().reverse();
 
       let payload: any | null = null;
       for (const token of tokens) {
@@ -55,7 +87,7 @@ export async function middleware(req: NextRequest) {
           payload = pl;
           break;
         } catch {
-          // だめなら次を試す
+          // 次の候補へ
         }
       }
 
@@ -65,7 +97,7 @@ export async function middleware(req: NextRequest) {
         const res = NextResponse.redirect(back, 303);
         res.cookies.set(COOKIE_NAME, "", { path: "/", maxAge: 0 });
         if (isProd) res.cookies.set(COOKIE_NAME, "", { path: "/", maxAge: 0, domain: COOKIE_DOMAIN_DEFAULT });
-        // 旧名も念のため掃除
+        // 旧名も念のため掃除（前回の一式から継承）
         res.cookies.set("arc_session", "", { path: "/", maxAge: 0 });
         res.cookies.set("arc_session_v2", "", { path: "/", maxAge: 0 });
         if (isProd) {
@@ -75,7 +107,7 @@ export async function middleware(req: NextRequest) {
         return res;
       }
 
-      // 残り <1日 ならスライディング延長
+      // 4) 残り < 1日ならスライディング延長
       const now = Math.floor(Date.now() / 1000);
       const exp = Number(payload.exp || 0);
       const needsRefresh = exp > 0 && exp - now < 60 * 60 * 24;
