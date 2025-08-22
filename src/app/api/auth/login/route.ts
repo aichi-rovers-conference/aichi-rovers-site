@@ -25,7 +25,8 @@ export async function POST(req: Request) {
       const rawUser = String(form.get("username") ?? form.get("id") ?? "");
       usernameNorm = rawUser.trim();
       password = String(form.get("password") ?? "").trim();
-      remember = form.has("remember"); // ★チェック時のみ存在
+      // チェック時のみキーが存在する
+      remember = form.has("remember");
     } else {
       const body = await req.json().catch(() => ({}));
       const rawUser = String(body?.id ?? body?.username ?? "");
@@ -56,7 +57,7 @@ export async function POST(req: Request) {
       role: user.role as Role,
       isSuper: user.isSuper,
       isActive: user.isActive,
-      remember, // ★ミドルウェアの延長用に入れる
+      remember,
     };
     const token = await signSession(payload, remember ? "30d" : "8h");
     const maxAge = remember ? 60 * 60 * 24 * 30 : 60 * 60 * 8;
@@ -72,7 +73,13 @@ export async function POST(req: Request) {
 
     res.headers.set("Cache-Control", "no-store, max-age=0");
 
-    // ★本番は常に Domain 付与（apex/www を共有）
+    // ★ 先に旧Cookieを両バリアントで掃除（host-only / domain付き）
+    res.cookies.set(COOKIE_NAME, "", { path: "/", maxAge: 0 });
+    if (isProd) {
+      res.cookies.set(COOKIE_NAME, "", { path: "/", maxAge: 0, domain: cookieDomain });
+    }
+
+    // 新しいセッションクッキー（本番は常に Domain 付与）
     res.cookies.set(COOKIE_NAME, token, {
       httpOnly: true,
       secure: isProd,
@@ -82,13 +89,12 @@ export async function POST(req: Request) {
       ...(isProd ? { domain: cookieDomain } : {}),
     });
 
-    // レガシー Cookie の掃除
+    // レガシーCookie掃除（両バリアント）
     for (const legacy of ["admin", "admin_id", "admin_role", "session"]) {
-      res.cookies.set(legacy, "", {
-        path: "/",
-        maxAge: 0,
-        ...(isProd ? { domain: cookieDomain } : {}),
-      });
+      res.cookies.set(legacy, "", { path: "/", maxAge: 0 });
+      if (isProd) {
+        res.cookies.set(legacy, "", { path: "/", maxAge: 0, domain: cookieDomain });
+      }
     }
 
     return res;
