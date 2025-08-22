@@ -15,7 +15,7 @@ const AUD = process.env.AUTH_AUDIENCE ?? "arc-web";
 const CANONICAL_HOST = process.env.CANONICAL_HOST ?? "aichirovers.com";
 const ALLOWED_HOSTS = new Set([CANONICAL_HOST, `www.${CANONICAL_HOST}`]);
 
-/* Cookie domain（本番・正規ホスト系のみ付与） */
+/* Cookie domain（本番は常に付与して apex/www 共有） */
 const COOKIE_DOMAIN_DEFAULT = `.${CANONICAL_HOST}`;
 
 /* CSRF: 同一オリジン/サイトを許可 */
@@ -25,8 +25,18 @@ const ALLOWED_ORIGINS = new Set<string>([
   ...(process.env.EXTRA_ORIGINS?.split(",").map(s => s.trim()).filter(Boolean) ?? []),
 ]);
 
-/* 公開で通すパス（/exec 配下の例外など） */
+/* 公開で通すパス */
 const PUBLIC_EXEC_PATHS = ["/exec/meetings/qr/show"];
+
+/* 認証不要で常に素通しするパス（ログイン関連など） */
+function isAlwaysPublic(pathname: string) {
+  return (
+    pathname === "/login" ||
+    pathname.startsWith("/api/auth/login") || // ★ ログインAPIは常に素通し
+    pathname.startsWith("/p/") ||
+    PUBLIC_EXEC_PATHS.some(p => pathname.startsWith(p))
+  );
+}
 
 /* ========= ユーティリティ ========= */
 type Payload = {
@@ -105,6 +115,10 @@ function isStateChangingMethod(m: string) {
 /* /api の状態変更メソッドに対する SameSite CSRF ガード */
 function sameSiteCsrfGuard(req: NextRequest): NextResponse | null {
   const { pathname } = req.nextUrl;
+
+  // ★ ログイン API は CSRF ガードの対象外（同一サイト form POST の相性問題回避）
+  if (pathname.startsWith("/api/auth/login")) return null;
+
   if (!(pathname.startsWith("/api") && isStateChangingMethod(req.method))) return null;
 
   const origin = req.headers.get("origin");
@@ -121,7 +135,7 @@ function sameSiteCsrfGuard(req: NextRequest): NextResponse | null {
   return new NextResponse("Forbidden (CSRF)", { status: 403 });
 }
 
-/* HTTPS 強制 & ホスト正規化 */
+/* HTTPS 強制 & ホスト正規化（最上流） */
 function httpsAndHostRedirect(req: NextRequest): NextResponse | null {
   if (!isProd) return null;
 
@@ -145,36 +159,32 @@ function httpsAndHostRedirect(req: NextRequest): NextResponse | null {
 
 /* ========= Middleware 本体 ========= */
 export async function middleware(req: NextRequest) {
-  // 1) HTTPS/ホスト正規化
+  // 1) HTTPS/ホスト正規化（★最上流）
   const hop = httpsAndHostRedirect(req);
   if (hop) return hop;
 
-  const { pathname } = req.nextUrl;
+  const url = req.nextUrl;
+  const { pathname, search } = url;
 
   // 2) CSRF ガード
   const csrf = sameSiteCsrfGuard(req);
   if (csrf) return csrf;
 
-  // 3) 認可（/exec と /polls/admin を保護。PUBLIC_EXEC_PATHS は免除）
-  if (!PUBLIC_EXEC_PATHS.some((p) => pathname.startsWith(p))) {
+  // 3) 認可（/exec と /polls/admin を保護）—公開/ログイン系は素通し
+  if (!isAlwaysPublic(pathname)) {
     const needsAuth = pathname.startsWith("/exec") || pathname.startsWith("/polls/admin");
     if (needsAuth) {
       const token = req.cookies.get(COOKIE_NAME)?.value;
+
       if (!token) {
-        const url = req.nextUrl.clone();
-        url.pathname = "/login";                // 未ログイン → /login
-        url.searchParams.set("next", pathname || "/exec");
-        url.searchParams.set("auth", "required");
-        return NextResponse.redirect(url);
+        const back = new URL(`/login?next=${encodeURIComponent(pathname + search)}&auth=required`, url);
+        return NextResponse.redirect(back, 303); // ★ 303 に統一
       }
 
       const payload = await verify(token);
       if (!payload) {
-        const url = req.nextUrl.clone();
-        url.pathname = "/login";                // 期限切れ → /login
-        url.searchParams.set("next", pathname || "/exec");
-        url.searchParams.set("auth", "expired");
-        return NextResponse.redirect(url);
+        const back = new URL(`/login?next=${encodeURIComponent(pathname + search)}&auth=expired`, url);
+        return NextResponse.redirect(back, 303);
       }
 
       // 4) スライディング延長（残り < 1日）
@@ -185,6 +195,8 @@ export async function middleware(req: NextRequest) {
       const res = NextResponse.next();
 
       if (needsRefresh) {
+        // remember が入っていないトークンもあるため、未定義時は「短期」扱いにするか、
+        // 運用に合わせて true/false を固定してください。
         const remember = !!payload.remember;
         const expStr = remember ? "30d" : "8h";
 
@@ -201,20 +213,14 @@ export async function middleware(req: NextRequest) {
           .setExpirationTime(expStr)
           .sign(SECRET);
 
-        // Cookie の domain は本番・正規ホストの場合のみ付与（プレビュー/localhost を壊さない）
-        const host = (req.headers.get("host") || "").toLowerCase();
-        const shouldSetDomain =
-          isProd &&
-          !!host &&
-          (host === CANONICAL_HOST || host === `www.${CANONICAL_HOST}` || host.endsWith(`.${CANONICAL_HOST}`));
-
+        // ★ 本番は常に Domain を付与（apex/www 跨ぎで確実に届く）
         res.cookies.set(COOKIE_NAME, refreshed, {
           httpOnly: true,
           secure: isProd,
           sameSite: "lax",
           path: "/",
           maxAge: remember ? 60 * 60 * 24 * 30 : 60 * 60 * 8,
-          ...(shouldSetDomain ? { domain: COOKIE_DOMAIN_DEFAULT } : {}),
+          ...(isProd ? { domain: COOKIE_DOMAIN_DEFAULT } : {}),
         });
       }
 
@@ -235,5 +241,8 @@ export async function middleware(req: NextRequest) {
 
 /* ========= 適用範囲 ========= */
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)"],
+  matcher: [
+    // 静的資産を除外（必要に応じて拡張）
+    "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|images|public|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|css|js|map)).*)",
+  ],
 };
