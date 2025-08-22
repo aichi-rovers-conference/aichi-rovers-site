@@ -3,7 +3,10 @@ import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { GalleryLayout as DbGalleryLayout } from "@prisma/client";
 
-// キャッシュさせない（必要なら）
+// 実行環境（Prisma を安定動作させるため）
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+// キャッシュしない
 export const revalidate = 0;
 
 // "grid"/"slideshow"（大文字小文字混在可）→ Prisma enum へ
@@ -22,82 +25,108 @@ const fromDbLayout = (v: any): "grid" | "slideshow" | null => {
   return s === "slideshow" ? "slideshow" : s === "grid" ? "grid" : null;
 };
 
-export async function GET(_req: Request, context: any) {
-  const slug = decodeURIComponent(context?.params?.slug ?? "");
-  if (!slug) return NextResponse.json({ ok: false, message: "Bad request" }, { status: 400 });
+// Next.js の仕様で params が Promise の場合があるため、ユニオンで受けて await する
+type Params = { slug: string };
 
-  const report = await prisma.meetingReport.findUnique({
-    where: { slug },
-    select: {
-      id: true,
-      title: true,
-      slug: true,
-      date: true,
-      fiscalYear: true,
-      round: true,
-      reportUrl: true,
-      coverUrl: true,
-      youtubeId: true,
-      isPublished: true,
-      updatedAt: true,
-      pageGallery: true,
-      groups: true,               // 本文セクション(JSON)
-      pageGalleryLayout: true,    // enum
-      // 旧互換が必要なら subtitle / lead / schedule / sections も追加で select
-    },
-  });
+export async function GET(
+  _req: Request,
+  ctx: { params: Promise<Params> } | { params: Params }
+) {
+  try {
+    const { slug: raw } = await (ctx.params as any); // ← ここがポイント
+    const slug = decodeURIComponent(raw ?? "");
+    if (!slug) {
+      return NextResponse.json({ ok: false, message: "Bad request" }, { status: 400 });
+    }
 
-  if (!report) return NextResponse.json({ ok: false, message: "Not found" }, { status: 404 });
+    const report = await prisma.meetingReport.findUnique({
+      where: { slug },
+      select: {
+        id: true,
+        title: true,
+        slug: true,
+        date: true,
+        fiscalYear: true,
+        round: true,
+        reportUrl: true,
+        coverUrl: true,
+        youtubeId: true,
+        isPublished: true,
+        updatedAt: true,
+        pageGallery: true,
+        groups: true,             // 本文セクション(JSON)
+        pageGalleryLayout: true,  // enum
+      },
+    });
 
-  // 必要なら enum → UI 値へ寄せて返却
-  const data = {
-    ...report,
-    pageGalleryLayout: fromDbLayout(report.pageGalleryLayout),
-  };
+    if (!report) {
+      return NextResponse.json({ ok: false, message: "Not found" }, { status: 404 });
+    }
 
-  return NextResponse.json({ ok: true, data });
+    // enum を UI 値へ寄せて返却
+    const data = {
+      ...report,
+      pageGalleryLayout: fromDbLayout(report.pageGalleryLayout),
+    };
+
+    return NextResponse.json({ ok: true, data });
+  } catch (err) {
+    console.error("[GET /api/meeting-reports/[slug]]", err);
+    return NextResponse.json({ ok: false, message: "Internal error" }, { status: 500 });
+  }
 }
 
-export async function PUT(req: Request, context: any) {
-  const slug = decodeURIComponent(context?.params?.slug ?? "");
-  if (!slug) return NextResponse.json({ ok: false, message: "Bad request" }, { status: 400 });
+export async function PUT(
+  req: Request,
+  ctx: { params: Promise<Params> } | { params: Params }
+) {
+  try {
+    const { slug: raw } = await (ctx.params as any); // ← ここがポイント
+    const slug = decodeURIComponent(raw ?? "");
+    if (!slug) {
+      return NextResponse.json({ ok: false, message: "Bad request" }, { status: 400 });
+    }
 
-  const body = await req.json();
+    const body = await req.json();
 
-  // UI 側は sections で送ってくる想定（後方互換で groups も許可）
-  const groups =
-    Array.isArray(body.sections) ? body.sections :
-    Array.isArray(body.groups) ? body.groups : [];
+    // UI 側は sections で送ってくる想定（後方互換で groups も許可）
+    const groups =
+      Array.isArray(body.sections) ? body.sections :
+      Array.isArray(body.groups) ? body.groups : [];
 
-  const updated = await prisma.meetingReport.update({
-    where: { slug },
-    data: {
-      title: body.title,
-      date: new Date(body.date),
-      round: body.round,
-      fiscalYear: body.fiscalYear,
-      reportUrl: body.reportUrl ?? null,
-      coverUrl: body.coverUrl ?? null,
-      youtubeId: body.youtubeId ?? null,
-      isPublished: !!body.isPublished,
-      pageGallery: body.pageGallery ?? [],
-      groups, // ← 子ギャラリーの layout も JSON に含まれて保存されます
-      pageGalleryLayout: { set: toDbLayout(body.pageGalleryLayout) }, // ← 重要
-    },
-    select: {
-      id: true,
-      slug: true,
-      isPublished: true,
-      pageGalleryLayout: true,
-      updatedAt: true,
-    },
-  });
+    const updated = await prisma.meetingReport.update({
+      where: { slug },
+      data: {
+        title: body.title,
+        date: body.date ? new Date(body.date) : undefined,
+        round: body.round,
+        fiscalYear: body.fiscalYear,
+        reportUrl: body.reportUrl ?? null,
+        coverUrl: body.coverUrl ?? null,
+        youtubeId: body.youtubeId ?? null,
+        isPublished: !!body.isPublished,
+        pageGallery: body.pageGallery ?? [],
+        groups, // ← 子ギャラリーの layout も JSON に含まれて保存
+        pageGalleryLayout: { set: toDbLayout(body.pageGalleryLayout) }, // ← enum を安全にセット
+      },
+      select: {
+        id: true,
+        slug: true,
+        isPublished: true,
+        pageGalleryLayout: true,
+        updatedAt: true,
+      },
+    });
 
-  return NextResponse.json({
-    ok: true,
-    data: {
-      ...updated,
-      pageGalleryLayout: fromDbLayout(updated.pageGalleryLayout),
-    },
-  });
+    return NextResponse.json({
+      ok: true,
+      data: {
+        ...updated,
+        pageGalleryLayout: fromDbLayout(updated.pageGalleryLayout),
+      },
+    });
+  } catch (err) {
+    console.error("[PUT /api/meeting-reports/[slug]]", err);
+    return NextResponse.json({ ok: false, message: "Internal error" }, { status: 500 });
+  }
 }
