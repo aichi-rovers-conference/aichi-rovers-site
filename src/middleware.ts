@@ -62,7 +62,7 @@ export async function middleware(req: NextRequest) {
   const { pathname, search } = url;
 
   // 2) 既ログインなら /login と / から /exec に誘導
-  if (pathname === "/login" || pathname === "/") {
+  if (pathname === "/login") {
     const bypass = url.searchParams.get("home") === "1" || url.searchParams.get("noexec") === "1";
     if (!bypass) {
       const tokens = req.cookies

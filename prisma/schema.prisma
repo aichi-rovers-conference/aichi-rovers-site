@@ -254,6 +254,17 @@ model Submission {
   @@index([pollId, createdAt])
 }
 
+model SubmissionNonce {
+  id        String   @id @default(cuid())
+  pollId    String
+  nonce     String   @unique
+  createdAt DateTime @default(now())
+  usedAt    DateTime?
+
+  @@index([pollId, createdAt])
+  @@index([pollId, nonce])
+}
+
 model Answer {
   id           String     @id @default(cuid())
   submissionId String

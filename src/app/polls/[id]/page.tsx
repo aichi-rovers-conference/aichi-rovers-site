@@ -1,7 +1,7 @@
 // app/polls/[id]/page.tsx
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 
 import ScaleQuestion from "@/src/components/polls/ScaleQuestion";
@@ -12,53 +12,31 @@ import RatingQuestion from "@/src/components/polls/RatingQuestion";
 
 /* ===================== 型 ===================== */
 
-// UI側の質問タイプ（小文字）
 export type QuestionType = "text" | "single" | "multiple" | "linear" | "rating";
 
 export type Question = {
   id: string;
   title: string;
   helpText?: string;
-  type: QuestionType | string; // 外部API互換で string も受ける
+  type: QuestionType | string;
   required?: boolean;
-
-  // 選択肢（radio/checkbox 用）
   options?: string[];
   choices?: { id: string; label: string }[];
-
-  // 既存互換（scale が top-level にあるケース）
   min?: number | string;
   max?: number | string;
   minLabel?: string;
   maxLabel?: string;
-
-  // API がここに入れて返す場合（scale/text 両方）
   config?: {
-    // scale 用
     min?: number | string;
     max?: number | string;
     minLabel?: string;
     maxLabel?: string;
-    // text 用
     placeholder?: string;
     multiline?: boolean;
     rows?: number | string;
   };
-
-  // editor 互換（scale）
-  scale?: {
-    min: 0 | 1 | string;
-    max: number | string;
-    minLabel?: string;
-    maxLabel?: string;
-  };
-
-  // 互換（text）
-  text?: {
-    placeholder?: string;
-    multiline?: boolean;
-    rows?: number | string;
-  };
+  scale?: { min: 0 | 1 | string; max: number | string; minLabel?: string; maxLabel?: string };
+  text?: { placeholder?: string; multiline?: boolean; rows?: number | string };
 };
 
 export type Poll = {
@@ -71,96 +49,50 @@ export type Poll = {
 /* ===================== ユーティリティ ===================== */
 
 const cls = (...xs: Array<string | false | undefined | null>) => xs.filter(Boolean).join(" ");
-
-const toNum = (x: unknown, fallback: number) => {
-  const n = typeof x === "number" ? x : typeof x === "string" ? Number(x) : NaN;
-  return Number.isFinite(n) ? n : fallback;
-};
-
+const toNum = (x: unknown, fb: number) => (Number.isFinite(Number(x)) ? Number(x) : fb);
 type ScaleShape = { min: 0 | 1; max: number; minLabel: string; maxLabel: string };
 
-// 質問から scale を正規化（top-level / scale / config のどれでもOK・文字列にも対応）
 function normalizeScaleFromQuestion(q: Question): ScaleShape {
   const src =
     (q as any).scale ??
-    (q as any).config ?? {
-      min: (q as any).min,
-      max: (q as any).max,
-      minLabel: (q as any).minLabel,
-      maxLabel: (q as any).maxLabel,
-    };
-
+    (q as any).config ?? { min: (q as any).min, max: (q as any).max, minLabel: (q as any).minLabel, maxLabel: (q as any).maxLabel };
   const rawMin = (src as any)?.min;
   const min = rawMin === 0 || rawMin === "0" ? 0 : (1 as 0 | 1);
-
   let max = toNum((src as any)?.max, 5);
-  // 2〜10にクランプし、min + 1 以上
   max = Math.min(10, Math.max(2, Math.max(min + 1, max)));
-
-  return {
-    min,
-    max,
-    minLabel: (src as any)?.minLabel ?? "",
-    maxLabel: (src as any)?.maxLabel ?? "",
-  };
+  return { min, max, minLabel: (src as any)?.minLabel ?? "", maxLabel: (src as any)?.maxLabel ?? "" };
 }
 
-// テキスト設定を正規化（config / text / デフォルト）
 function normalizeTextConfig(q: Question) {
   const src =
     (q as any).config?.text ??
     (q as any).text ??
-    (q as any).config ?? {
-      placeholder: (q as any).placeholder,
-      multiline: (q as any).multiline,
-      rows: (q as any).rows,
-    };
-
-  const multiline =
-    typeof src.multiline === "boolean"
-      ? src.multiline
-      : typeof (q as any).multiline === "boolean"
-      ? (q as any).multiline
-      : true;
-
-  const _toNum = (x: unknown, fb: number) => {
-    const n = typeof x === "number" ? x : typeof x === "string" ? Number(x) : NaN;
-    return Number.isFinite(n) ? n : fb;
-  };
+    (q as any).config ?? { placeholder: (q as any).placeholder, multiline: (q as any).multiline, rows: (q as any).rows };
+  const multiline = typeof src.multiline === "boolean" ? src.multiline : typeof (q as any).multiline === "boolean" ? (q as any).multiline : true;
   const rowsRaw = src.rows ?? (q as any).rows;
-  const rows = multiline ? Math.max(1, Math.min(50, _toNum(rowsRaw, 4))) : undefined;
-
+  const rows = multiline ? Math.max(1, Math.min(50, toNum(rowsRaw, 4))) : undefined;
   const ph = src.placeholder ?? (q as any).placeholder;
   const placeholder = typeof ph === "string" ? ph : multiline ? "長文回答" : "回答を入力";
-
   return { multiline, rows, placeholder };
 }
 
 function getOptions(q: Question): string[] {
   const optAny = (q as any).options;
   if (Array.isArray(optAny) && optAny.length > 0) {
-    const first = optAny[0];
-    if (typeof first === "string") return optAny as string[];
-    return (optAny as Array<any>).map((o) => (typeof o === "string" ? o : o?.label ?? ""));
+    return typeof optAny[0] === "string" ? (optAny as string[]) : (optAny as any[]).map((o) => (typeof o === "string" ? o : o?.label ?? ""));
   }
   const cs: Array<any> | undefined = (q as any).choices;
-  if (Array.isArray(cs) && cs.length > 0) {
-    return cs.map((c) => c?.label ?? "");
-  }
-  return [];
+  return Array.isArray(cs) && cs.length > 0 ? cs.map((c) => c?.label ?? "") : [];
 }
 
 function getChoiceIdMap(q: Question): Record<string, string> | null {
   const cs = (q as any).choices as Array<{ id: string; label: string }> | undefined;
-  if (Array.isArray(cs) && cs.length > 0) {
-    const map: Record<string, string> = {};
-    for (const c of cs) map[c.label] = c.id;
-    return map;
-  }
-  return null;
+  if (!Array.isArray(cs) || cs.length === 0) return null;
+  const map: Record<string, string> = {};
+  for (const c of cs) map[c.label] = c.id;
+  return map;
 }
 
-// 外部APIの type を UI の小文字タイプに寄せる
 function normalizeType(t: string | undefined): QuestionType {
   const s = (t ?? "").toLowerCase();
   if (["shorttext", "longtext", "paragraph", "textarea", "text", "textbox"].includes(s)) return "text";
@@ -168,7 +100,6 @@ function normalizeType(t: string | undefined): QuestionType {
   if (["multiple", "checkbox", "multichoice", "checkboxes"].includes(s)) return "multiple";
   if (["linear", "scale", "scalequestion"].includes(s)) return "linear";
   if (["rating", "ratingquestion", "stars"].includes(s)) return "rating";
-  // 未知は text にフォールバック
   return "text";
 }
 
@@ -195,7 +126,7 @@ function validateRequired(q: Question, value: unknown): string | null {
 }
 
 /* ===================== API 送信用シリアライズ ===================== */
-/** サーバーAPIの期待する配列形に変換（type は大文字に寄せる） */
+
 function serializeAnswersForApi(poll: Poll, raw: Record<string, unknown>) {
   type Out =
     | { questionId: string; type: "RADIO"; choiceId?: string; value?: string }
@@ -203,47 +134,32 @@ function serializeAnswersForApi(poll: Poll, raw: Record<string, unknown>) {
     | { questionId: string; type: "TEXT"; text: string }
     | { questionId: string; type: "SCALE"; scaleValue?: number }
     | { questionId: string; type: "RATING"; ratingValue?: number };
-
   const out: Out[] = [];
   for (const q of poll.questions) {
     const t = normalizeType(String(q.type));
     const v = raw[q.id];
-
     if (t === "single") {
-      // ラベルを選ばせている前提 → id に解決（idが無い場合は value に退避）
       const label = v == null ? "" : String(v);
       const map = getChoiceIdMap(q);
-      if (map) {
-        out.push({ questionId: q.id, type: "RADIO", choiceId: map[label] ?? undefined, value: label });
-      } else {
-        out.push({ questionId: q.id, type: "RADIO", value: label });
-      }
+      out.push(map ? { questionId: q.id, type: "RADIO", choiceId: map[label] ?? undefined, value: label } : { questionId: q.id, type: "RADIO", value: label });
       continue;
     }
-
     if (t === "multiple") {
       const labels = Array.isArray(v) ? (v as string[]) : [];
       const map = getChoiceIdMap(q);
-      if (map) {
-        const ids = labels.map((l) => map[l]).filter(Boolean);
-        out.push({ questionId: q.id, type: "CHECKBOX", choiceIds: ids, values: labels });
-      } else {
-        out.push({ questionId: q.id, type: "CHECKBOX", choiceIds: [], values: labels });
-      }
+      const ids = map ? labels.map((l) => map[l]).filter(Boolean) : [];
+      out.push({ questionId: q.id, type: "CHECKBOX", choiceIds: ids, values: labels });
       continue;
     }
-
     if (t === "text") {
       out.push({ questionId: q.id, type: "TEXT", text: String(v ?? "") });
       continue;
     }
-
     if (t === "linear") {
       const num = Number(v);
       out.push({ questionId: q.id, type: "SCALE", scaleValue: Number.isFinite(num) ? num : undefined });
       continue;
     }
-
     if (t === "rating") {
       const num = Number(v);
       out.push({ questionId: q.id, type: "RATING", ratingValue: Number.isFinite(num) ? num : undefined });
@@ -255,20 +171,13 @@ function serializeAnswersForApi(poll: Poll, raw: Record<string, unknown>) {
 
 /* ===================== 質問カード ===================== */
 
-function QuestionCard(props: {
-  q: Question;
-  value: unknown;
-  onChange: (val: unknown) => void;
-  error?: string | null;
-}) {
+function QuestionCard(props: { q: Question; value: unknown; onChange: (val: unknown) => void; error?: string | null }) {
   const { q, value, onChange, error } = props;
   const type = normalizeType(String(q.type));
 
   return (
     <div className={cls("relative rounded-xl border border-slate-200 bg-white p-5 shadow-sm", error && "border-red-300")}>
-      {/* 左アクセントバー */}
       <div className="absolute left-0 top-0 h-full w-1.5 rounded-l-xl bg-purple-600" />
-
       <div className="mb-3">
         <div className="flex items-start gap-2">
           <h3 className="text-base sm:text-lg font-semibold text-slate-800">
@@ -279,31 +188,12 @@ function QuestionCard(props: {
         {q.helpText && <p className="mt-1 text-sm text-slate-500">{q.helpText}</p>}
       </div>
 
-      {/* 入力UI */}
       {type === "text" && (() => {
         const t = normalizeTextConfig(q);
-        return (
-          <TextQuestion
-            mode="answer"
-            name={q.id}
-            multiline={t.multiline}
-            rows={t.rows}
-            placeholder={t.placeholder}
-            value={String(value ?? "")}
-            onValueChange={(v) => onChange(v)}
-          />
-        );
+        return <TextQuestion mode="answer" name={q.id} multiline={t.multiline} rows={t.rows} placeholder={t.placeholder} value={String(value ?? "")} onValueChange={(v) => onChange(v)} />;
       })()}
 
-      {type === "single" && (
-        <RadioQuestion
-          mode="answer"
-          name={q.id}
-          options={getOptions(q)}
-          value={String(value ?? "")}
-          onValueChange={(v) => onChange(v)} // v はラベル文字列
-        />
-      )}
+      {type === "single" && <RadioQuestion mode="answer" name={q.id} options={getOptions(q)} value={String(value ?? "")} onValueChange={(v) => onChange(v)} />}
 
       {type === "multiple" && (
         <CheckboxQuestion
@@ -325,26 +215,10 @@ function QuestionCard(props: {
       {type === "linear" && (() => {
         const s = normalizeScaleFromQuestion(q);
         const qForScale = { ...(q as any), scale: s } as any;
-        return (
-          <ScaleQuestion
-            mode="answer"
-            q={qForScale}
-            name={q.id}
-            value={Number(value ?? s.min)}
-            onValueChange={(v) => onChange(v)}
-          />
-        );
+        return <ScaleQuestion mode="answer" q={qForScale} name={q.id} value={Number(value ?? s.min)} onValueChange={(v) => onChange(v)} />;
       })()}
 
-      {type === "rating" && (
-        <RatingQuestion
-          mode="answer"
-          q={q as any}
-          name={q.id}
-          value={Number(value ?? 1)}
-          onValueChange={(v) => onChange(v)}
-        />
-      )}
+      {type === "rating" && <RatingQuestion mode="answer" q={q as any} name={q.id} value={Number(value ?? 1)} onValueChange={(v) => onChange(v)} />}
 
       {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
     </div>
@@ -362,6 +236,13 @@ export default function PollAnswerPage() {
   const [loading, setLoading] = useState(true);
   const [errors, setErrors] = useState<Record<string, string | null>>({});
   const [answers, setAnswers] = useState<Record<string, any>>({});
+  const [submitting, setSubmitting] = useState(false);
+
+  // ★ 送信用ワンタイムトークン（nonce）
+  const nonceRef = useRef<string>("");
+
+  // ★ 同期ロック（1フレーム内の連打をただちに無効化）
+  const submittingLockRef = useRef(false);
 
   const progress = useMemo(() => {
     if (!poll) return 0;
@@ -371,6 +252,7 @@ export default function PollAnswerPage() {
     return Math.round((filled / req.length) * 100);
   }, [poll, answers]);
 
+  // フォーム本体のロード
   useEffect(() => {
     let alive = true;
     async function run() {
@@ -381,15 +263,13 @@ export default function PollAnswerPage() {
         const data: Poll = await res.json();
         if (!alive) return;
         setPoll(data);
-
-        // 初期値
         const init: Record<string, unknown> = {};
         for (const q of data.questions) {
           const type = normalizeType(String(q.type));
           if (type === "multiple") init[q.id] = [] as string[];
           else if (type === "linear") init[q.id] = normalizeScaleFromQuestion(q).min;
           else if (type === "rating") init[q.id] = 1;
-          else init[q.id] = ""; // text / single
+          else init[q.id] = "";
         }
         setAnswers(init);
       } catch (e) {
@@ -404,24 +284,25 @@ export default function PollAnswerPage() {
     };
   }, [pollId]);
 
+  // ★ 送信用 nonce を取得（ページ表示ごとに1回）
   useEffect(() => {
-    if (!poll) return;
-    const snapshot = poll.questions.map((q) => ({
-      id: q.id,
-      type: String(q.type),
-      RESOLVED: normalizeTextConfig(q),
-      RAW: {
-        top_level: {
-          placeholder: (q as any).placeholder,
-          multiline: (q as any).multiline,
-          rows: (q as any).rows,
-        },
-        config: (q as any).config,
-        text: (q as any).text,
-      },
-    }));
-    console.log("TEXT-CONFIG RESOLVED\n" + JSON.stringify(snapshot, null, 2));
-  }, [poll]);
+    let alive = true;
+    async function getNonce() {
+      try {
+        const r = await fetch(`/api/polls/${pollId}/nonce`, { cache: "no-store" });
+        if (!r.ok) throw new Error("failed to get nonce");
+        const j = await r.json();
+        if (alive) nonceRef.current = j.nonce;
+      } catch (e) {
+        console.error(e);
+        nonceRef.current = "";
+      }
+    }
+    if (pollId) getNonce();
+    return () => {
+      alive = false;
+    };
+  }, [pollId]);
 
   const update = (qid: string, val: unknown) => {
     setAnswers((prev) => ({ ...prev, [qid]: val }));
@@ -430,7 +311,16 @@ export default function PollAnswerPage() {
 
   // ====== 送信 ======
   const onSubmit = async () => {
-    if (!poll) return;
+    // ★ 即時ロック
+    if (submittingLockRef.current) return;
+    submittingLockRef.current = true;
+    setSubmitting(true);
+
+    if (!poll) {
+      submittingLockRef.current = false;
+      setSubmitting(false);
+      return;
+    }
 
     // 必須チェック
     const e: Record<string, string | null> = {};
@@ -441,18 +331,23 @@ export default function PollAnswerPage() {
     setErrors(e);
     if (Object.values(e).some(Boolean)) {
       const first = poll.questions.find((q) => e[q.id]);
-      if (first) {
-        document.getElementById(`q-${first.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-      }
+      if (first) document.getElementById(`q-${first.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      submittingLockRef.current = false;
+      setSubmitting(false);
+      return;
+    }
+
+    // ★ nonce が無ければ送信不可（ページ再読込を促す）
+    if (!nonceRef.current) {
+      alert("送信トークンの取得に失敗しました。ページを再読み込みしてからもう一度お試しください。");
+      submittingLockRef.current = false;
+      setSubmitting(false);
       return;
     }
 
     try {
-      // API 期待形（配列）に変換
       const answersArray = serializeAnswersForApi(poll, answers);
-      const body = { answers: answersArray };
-
-      console.log("SUBMIT body (answers[]):", body);
+      const body = { answers: answersArray, nonce: nonceRef.current };
 
       const endpoint = `/api/polls/${encodeURIComponent(poll.id)}/submissions`;
       const res = await fetch(endpoint, {
@@ -461,19 +356,26 @@ export default function PollAnswerPage() {
         body: JSON.stringify(body),
       });
 
-      const text = await res.text().catch(() => "");
-      if (!res.ok) {
-        if (res.status === 409) throw new Error("同じ端末からは既に回答済みの可能性があります。");
+      // 二重送信 (409) は成功扱いでOK（サーバで既存IDを返す場合もあり）
+      if (!res.ok && res.status !== 409) {
+        const text = await res.text().catch(() => "");
         throw new Error(text || `failed to submit (HTTP ${res.status})`);
       }
 
       alert("送信が完了しました。ご回答ありがとうございます！");
       router.push(`/polls/${poll.id}/thanks`);
-      // router.push(`/polls/${poll.id}/thanks`);
     } catch (err) {
       console.error(err);
       alert(err instanceof Error ? err.message : "送信に失敗しました。時間をおいて再度お試しください。");
+      submittingLockRef.current = false;
+      setSubmitting(false);
     }
+
+    // 成功時は遷移でアンマウントされるはずだが、保険で解除
+    setTimeout(() => {
+      submittingLockRef.current = false;
+      setSubmitting(false);
+    }, 1500);
   };
 
   /* ===================== レンダリング ===================== */
@@ -515,13 +417,9 @@ export default function PollAnswerPage() {
 
   return (
     <main className="min-h-screen bg-slate-50">
-      {/* ヘッダーバー（Googleフォーム風） */}
       <div className="h-44 w-full bg-gradient-to-r from-purple-600 to-indigo-600" />
-
-      {/* メインカード */}
       <div className="-mt-16 px-4 pb-24">
         <div className="mx-auto max-w-2xl rounded-xl border border-slate-200 bg-white shadow-md">
-          {/* タイトル & 進捗 */}
           <header className="flex items-start gap-3 p-6">
             <div className="mt-1 h-6 w-1.5 rounded bg-purple-600" />
             <div className="flex-1">
@@ -539,19 +437,22 @@ export default function PollAnswerPage() {
 
           <div className="h-px w-full bg-slate-100" />
 
-          {/* 質問エリア */}
           <section className="space-y-6 p-6">
             {poll.questions.map((q) => (
               <div id={`q-${q.id}`} key={q.id}>
-                <QuestionCard q={q} value={answers[q.id]} onChange={(v) => {
-                  setAnswers((prev) => ({ ...prev, [q.id]: v }));
-                  setErrors((prev) => ({ ...prev, [q.id]: null }));
-                }} error={errors[q.id]} />
+                <QuestionCard
+                  q={q}
+                  value={answers[q.id]}
+                  onChange={(v) => {
+                    setAnswers((prev) => ({ ...prev, [q.id]: v }));
+                    setErrors((prev) => ({ ...prev, [q.id]: null }));
+                  }}
+                  error={errors[q.id]}
+                />
               </div>
             ))}
           </section>
 
-          {/* フッター */}
           <div className="flex items-center justify-between px-6 pb-6">
             <button
               type="button"
@@ -563,9 +464,11 @@ export default function PollAnswerPage() {
             <button
               type="button"
               onClick={onSubmit}
-              className="rounded-full bg-purple-600 px-6 py-2.5 text-sm font-semibold text-white shadow-md transition hover:bg-purple-700"
+              disabled={submitting}
+              aria-busy={submitting}
+              className="rounded-full bg-purple-600 px-6 py-2.5 text-sm font-semibold text-white shadow-md transition hover:bg-purple-700 disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              送信
+              {submitting ? "送信中…" : "送信"}
             </button>
           </div>
         </div>
