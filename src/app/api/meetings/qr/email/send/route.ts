@@ -1,57 +1,40 @@
-// app/api/arc/conference/[fy]/[round]/suggest/route.ts
+// app/api/meetings/qr/email/send/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "../../../../../../../lib/prisma";
+import prisma from "@/lib/prisma";
 import { cookies } from "next/headers";
-import { COOKIE_NAME, verifyToken } from "@/lib/auth";
-import nodemailer from "nodemailer";
+import { verifyToken, COOKIE_NAME } from "@/lib/auth";
+import { getMailer, smtpEnvStatus } from "@/lib/mailer";
 
-export const runtime = "nodejs";      // ← nodemailer/Prisma 用に Node 実行へ固定
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-export const maxDuration = 60;        // ← Hobby でも余裕を持たせる
 
-/** nodemailer transport 生成 */
-function getTransport() {
-  const host = process.env.SMTP_HOST;
-  const port = Number(process.env.SMTP_PORT || "587");
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
-  const secureRaw = String(process.env.SMTP_SECURE || "").toLowerCase();
-  const secure = secureRaw === "true" || secureRaw === "1";
-  if (!host || !user || !pass) return null;
-  return nodemailer.createTransport({ host, port, secure, auth: { user, pass } });
-}
-
-function getTransportOrError() {
-  const t = getTransport();
-  if (!t) {
-    const err: any = new Error("SMTP not configured");
-    err.code = "NO_SMTP";
-    throw err;
-  }
-  return t;
-}
-
-/** text を HTML に安全変換（改行維持 & URL 自動リンク） */
+/** 改行維持＋URL自動リンク（簡易） */
 function textToHtml(text: string): string {
-  const ESC = (s: string) =>
-    s.replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]!));
-
-  const marked = text.replace(/(https?:\/\/[^\s]+)/g, (u) => `__LINK__${u}__ENDLINK__`);
-  let escaped = ESC(marked);
-  escaped = escaped.replace(/__LINK__(https?:\/\/[^\s]+)__ENDLINK__/g, (_m, u) => {
-    const href = ESC(u);
+  const esc = (s: string) =>
+    s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
+  const marked = String(text ?? "").replace(/(https?:\/\/[^\s]+)/g, (u) => `__L__${u}__R__`);
+  const escaped = esc(marked).replace(/__L__(https?:\/\/[^\s]+)__R__/g, (_m, u) => {
+    const href = esc(u);
     return `<a href="${href}" target="_blank" rel="noreferrer">${href}</a>`;
   });
+  return `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:14px;line-height:1.7;color:#0f172a;white-space:pre-line;">${escaped}</div>`;
+}
 
-  return `
-  <div style="
-    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-    font-size: 14px; line-height: 1.7;
-    color: #0f172a; white-space: pre-line;
-  ">
-    ${escaped}
-  </div>`;
+/** 失敗メッセージから推定原因を返す */
+function classifySmtpError(msg: string) {
+  const m = (msg || "").toLowerCase();
+  if (m.includes("535") || m.includes("invalid login") || m.includes("authentication failed"))
+    return "認証エラー（SMTP_USER/SMTP_PASSが違う、またはリージョン違いの資格情報）";
+  if (m.includes("not verified") || m.includes("address is not verified") || m.includes("identity"))
+    return "From（送信元）未検証 or SESのリージョン不一致（そのリージョンでドメイン/アドレスをVerifyしていない）";
+  if (m.includes("message rejected"))
+    return "SESポリシーによる拒否（送信元未検証、抑制リスト、ポリシー違反など）";
+  if (m.includes("throttl"))
+    return "送信レート制限超過（SESのSending Quota/Rateを確認）";
+  if (m.includes("self signed certificate") || m.includes("certificate"))
+    return "TLS証明書問題（まず SMTP_PORT=587 / SMTP_SECURE=false で）";
+  return "不明（failures[].error を全部参照 / SESのイベントで要確認）";
 }
 
 export async function POST(req: NextRequest) {
@@ -61,33 +44,49 @@ export async function POST(req: NextRequest) {
     const token = jar.get(COOKIE_NAME)?.value ?? "";
     const me = token ? await verifyToken(token) : null;
     if (!me) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (me.role !== "ADMIN" && !me.isSuper) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
-    // 必要なら管理者限定にする
-    // const isSuper = !!process.env.SUPERADMIN_USERNAME && me.username === process.env.SUPERADMIN_USERNAME.trim();
-    // if (me.role !== "ADMIN" && !isSuper) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const body = (await req.json().catch(() => ({}))) as { max?: number };
+    const max = Math.min(200, Math.max(1, Number.isFinite(Number(body?.max)) ? Number(body!.max) : 50));
 
-    const body = await req.json().catch(() => ({}));
-    const max = Math.min(200, Math.max(1, Number(body?.max || 50)));
+    // メーラー
+    let transporter;
+    try {
+      transporter = getMailer();
+    } catch (err: any) {
+      return NextResponse.json(
+        { error: "NO_SMTP", message: err?.message ?? "SMTP not configured", status: smtpEnvStatus() },
+        { status: 400 }
+      );
+    }
 
-    const transporter = getTransportOrError();
-    // MAIL_FROM / SMTP_FROM / SMTP_USER の順で使用
-    const from = process.env.MAIL_FROM || process.env.SMTP_FROM || process.env.SMTP_USER!;
+    // 認証/ネットワークの根本異常を先に検出
+    try {
+      await transporter.verify();
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      return NextResponse.json(
+        { error: "SMTP_VERIFY_FAILED", message: msg, hint: classifySmtpError(msg), status: smtpEnvStatus() },
+        { status: 400 }
+      );
+    }
 
+    const from =
+      process.env.SMTP_FROM ??
+      process.env.MAIL_FROM ??
+      (process.env.SMTP_USER as string);
+
+    // バッチ取得
     const pending = await prisma.emailQueue.findMany({
       where: { status: "PENDING" },
       orderBy: { queuedAt: "asc" },
       take: max,
     });
 
-    if (pending.length === 0) {
-      return NextResponse.json(
-        { ok: true, sent: 0, failed: 0, remaining: 0 },
-        { headers: { "Cache-Control": "no-store" } }
-      );
-    }
-
-    let sent = 0;
-    let failed = 0;
+    let sent = 0, failed = 0;
+    const failures: Array<{ id: string; to: string; error: string; reason: string; code?: any; respCode?: any }> = [];
 
     for (const m of pending) {
       try {
@@ -96,33 +95,25 @@ export async function POST(req: NextRequest) {
           from,
           to: m.to,
           subject: m.subject,
-          text: m.body,
+          text: m.body ?? "",
           html,
         });
-
-        await prisma.emailQueue.update({
-          where: { id: m.id },
-          data: { status: "SENT", sentAt: new Date(), error: null },
-        });
+        await prisma.emailQueue.update({ where: { id: m.id }, data: { status: "SENT", sentAt: new Date(), error: null } });
         sent++;
       } catch (e: any) {
-        await prisma.emailQueue.update({
-          where: { id: m.id },
-          data: { status: "FAILED", error: e?.message || String(e) },
-        });
+        const errMsg = e?.message || String(e);
+        const reason = classifySmtpError(errMsg);
+        failures.push({ id: m.id, to: m.to, error: errMsg, reason, code: e?.code, respCode: e?.responseCode });
+        await prisma.emailQueue.update({ where: { id: m.id }, data: { status: "FAILED", error: errMsg } });
         failed++;
       }
     }
 
     const remaining = await prisma.emailQueue.count({ where: { status: "PENDING" } });
-    return NextResponse.json(
-      { ok: true, sent, failed, remaining },
-      { headers: { "Cache-Control": "no-store" } }
-    );
+    const hints = Array.from(new Set(failures.map((f) => f.reason)));
+
+    return NextResponse.json({ ok: true, sent, failed, remaining, failures, hints }, { headers: { "Cache-Control": "no-store" } });
   } catch (e: any) {
-    const code = e?.code || "SERVER_ERROR";
-    const msg = e?.message || String(e);
-    const status = code === "NO_SMTP" ? 400 : 500;
-    return NextResponse.json({ error: code, message: msg }, { status });
+    return NextResponse.json({ error: e?.code || "SERVER_ERROR", message: e?.message || String(e) }, { status: 500 });
   }
 }

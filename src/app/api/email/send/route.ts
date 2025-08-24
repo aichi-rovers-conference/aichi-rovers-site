@@ -1,44 +1,47 @@
 // app/api/email/send/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "../../../../../lib/prisma";
+import prisma from "@/lib/prisma";
 import { cookies } from "next/headers";
 import { verifyToken, COOKIE_NAME } from "@/lib/auth";
-import nodemailer from "nodemailer";
+import { getMailer, smtpEnvStatus } from "@/lib/mailer";
 
-export const runtime = "nodejs";       // ← nodemailer なので Node.js を明示
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-function getTransport() {
-  const host = process.env.SMTP_HOST;
-  const port = Number(process.env.SMTP_PORT || "587");
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
-  const secure = String(process.env.SMTP_SECURE || "false") === "true";
-  if (!host || !user || !pass) return null;
-  return nodemailer.createTransport({ host, port, secure, auth: { user, pass } });
-}
-
-/** 改行維持＋URL自動リンクの簡易HTML化 */
+/** 改行維持＋URL自動リンク（簡易） */
 function textToHtml(text: string): string {
   const esc = (s: string) =>
     s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
-  // 先にURLをマーキング → エスケープ → aタグに置換
   const marked = String(text ?? "").replace(/(https?:\/\/[^\s]+)/g, (u) => `__L__${u}__R__`);
   const escaped = esc(marked).replace(/__L__(https?:\/\/[^\s]+)__R__/g, (_m, u) => {
     const href = esc(u);
     return `<a href="${href}" target="_blank" rel="noreferrer">${href}</a>`;
   });
-  return `
-  <div style="font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
-              font-size:14px;line-height:1.7;color:#0f172a;white-space:pre-line;">
-    ${escaped}
-  </div>`;
+  return `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:14px;line-height:1.7;color:#0f172a;white-space:pre-line;">${escaped}</div>`;
+}
+
+/** 失敗メッセージから“ありがち原因”を推定 */
+function classifySmtpError(msg: string) {
+  const m = msg.toLowerCase();
+  if (m.includes("535") || m.includes("invalid login") || m.includes("authentication failed")) {
+    return "認証エラー（SMTP_USER/SMTP_PASSが違う、またはリージョン違いの資格情報）";
+  }
+  if (m.includes("not verified") || m.includes("address is not verified")) {
+    return "From（送信元）未検証 or SESのリージョン不一致（そのリージョンでドメイン/アドレスをVerifyしていない）";
+  }
+  if (m.includes("message rejected")) {
+    return "SESポリシーによる拒否（送信元未検証、抑制リスト、ポリシー違反など）";
+  }
+  if (m.includes("self signed certificate") || m.includes("certificate")) {
+    return "TLS証明書周り（まずは SMTP_PORT=587 / SMTP_SECURE=false で試す）";
+  }
+  return "不明（Networkタブのfailures/error全文またはSESコンソールのEventで要確認）";
 }
 
 export async function POST(req: NextRequest) {
   try {
-    // 認証
+    // ---- 認証 ----
     const jar = await cookies();
     const token = jar.get(COOKIE_NAME)?.value ?? "";
     const me = token ? await verifyToken(token) : null;
@@ -47,21 +50,43 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    // 入力
+    // ---- 入力 ----
     const body = (await req.json().catch(() => ({}))) as { max?: number };
     const max = Math.min(200, Math.max(1, Number.isFinite(Number(body?.max)) ? Number(body!.max) : 50));
 
-    const transporter = getTransport();
-    if (!transporter) {
+    // ---- メーラー取得 ----
+    let transporter;
+    try {
+      transporter = getMailer();
+    } catch (err: any) {
       return NextResponse.json(
-        { error: "NO_SMTP", message: "SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS を設定してください" },
+        { error: "NO_SMTP", message: err?.message ?? "SMTP not configured", status: smtpEnvStatus() },
         { status: 400 }
       );
     }
 
-    const from = process.env.SMTP_FROM || process.env.SMTP_USER!;
+    // ★ 事前に SMTP verify（認証やネットワークの根本異常を先に検出）
+    try {
+      await transporter.verify();
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      return NextResponse.json(
+        {
+          error: "SMTP_VERIFY_FAILED",
+          message: msg,
+          hint: classifySmtpError(msg),
+          status: smtpEnvStatus(),
+        },
+        { status: 400 }
+      );
+    }
 
-    // 送信待ちを古い順にバッチ取得
+    const from =
+      process.env.SMTP_FROM ??
+      process.env.MAIL_FROM ??
+      (process.env.SMTP_USER as string);
+
+    // ---- 送信待ち取得 ----
     const pending = await prisma.emailQueue.findMany({
       where: { status: "PENDING" },
       orderBy: { queuedAt: "asc" },
@@ -70,6 +95,7 @@ export async function POST(req: NextRequest) {
 
     let sent = 0;
     let failed = 0;
+    const failures: Array<{ id: string; to: string; error: string; reason: string }> = [];
 
     for (const m of pending) {
       try {
@@ -87,17 +113,24 @@ export async function POST(req: NextRequest) {
         });
         sent++;
       } catch (e: any) {
+        const errMsg = e?.message || String(e);
+        const reason = classifySmtpError(errMsg);
+        failures.push({ id: m.id, to: m.to, error: errMsg, reason });
         await prisma.emailQueue.update({
           where: { id: m.id },
-          data: { status: "FAILED", error: e?.message || String(e) },
+          data: { status: "FAILED", error: errMsg },
         });
         failed++;
       }
     }
 
     const remaining = await prisma.emailQueue.count({ where: { status: "PENDING" } });
+
+    // 代表的な“ヒント”をまとめて返す
+    const hints = Array.from(new Set(failures.map((f) => f.reason)));
+
     return NextResponse.json(
-      { ok: true, sent, failed, remaining },
+      { ok: true, sent, failed, remaining, failures, hints },
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (e: any) {

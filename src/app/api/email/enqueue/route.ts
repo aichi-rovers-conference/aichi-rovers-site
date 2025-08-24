@@ -1,13 +1,37 @@
-// app/api/email/enqueue/route.ts
+// app/api/meetings/qr/email/bulk/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "../../../../../lib/prisma";
+import prisma from "@/lib/prisma"; // ← default import に統一
 import { cookies } from "next/headers";
 import { verifyToken, COOKIE_NAME } from "@/lib/auth";
 import { EmailStatus } from "@prisma/client";
+import { renderTemplate } from "@/src/lib/mailTemplate";
+import { buildPreviewQrUrl } from "@/src/lib/qr";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+// baseUrlが来なかった場合に、絶対URLのオリジンを推定
+function computeOrigin(req: NextRequest, baseUrl?: string) {
+  if (baseUrl && typeof baseUrl === "string" && baseUrl.trim()) {
+    return baseUrl.replace(/\/$/, "");
+  }
+  const xfProto = req.headers.get("x-forwarded-proto");
+  const xfHost = req.headers.get("x-forwarded-host");
+  const host = xfHost ?? req.headers.get("host") ?? process.env.CANONICAL_HOST ?? "";
+  const proto = xfProto ?? (process.env.VERCEL ? "https" : "http");
+  return host ? `${proto}://${host}`.replace(/\/$/, "") : "";
+}
+
+// 👇 ユーティリティをこのファイル先頭近くに追加
+function toStringArrayUnique(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  const arr = (input as unknown[])
+    .map((v) => String(v ?? "")) // すべて文字列化
+    .filter((s) => s.length > 0); // 空文字は除外（必要なら）
+  return Array.from(new Set<string>(arr)); // 重複除去（<string>を明示）
+}
+
 
 export async function POST(req: NextRequest) {
   try {
@@ -18,16 +42,12 @@ export async function POST(req: NextRequest) {
     if (!me) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     // 入力
-    const body: unknown = await req.json().catch(() => ({}));
-    const b = (typeof body === "object" && body) as any;
-
+    const b = (await req.json().catch(() => ({}))) as any;
     const meetingCode = String(b?.meetingCode ?? "").trim();
     const subjectTpl = String(b?.subject ?? "");
     const bodyTpl = String(b?.body ?? "");
-    const baseUrl = String(b?.baseUrl ?? "").trim();
-    const ids: string[] = Array.isArray(b?.participantIds)
-      ? Array.from(new Set((b.participantIds as unknown[]).map((v) => String(v))))
-      : [];
+    const origin = computeOrigin(req, b?.baseUrl);
+    const ids: string[] = toStringArrayUnique(b?.participantIds);
 
     if (!meetingCode || !subjectTpl || !bodyTpl || ids.length === 0) {
       return NextResponse.json({ error: "invalid_payload" }, { status: 400 });
@@ -43,38 +63,35 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, enqueued: 0, skipped: ids.length });
     }
 
-    // 簡易テンプレ置換（全置換）
-    const fill = (tpl: string, map: Record<string, string>) =>
-      Object.entries(map).reduce((acc, [k, v]) => acc.split(k).join(v), tpl);
-
-    const origin = baseUrl.replace(/\/$/, ""); // 末尾スラッシュ除去
-
-    const queueRows = participants.map((p) => {
-      const map: Record<string, string> = {
-        "{{name}}": p.name,
-        "{{district}}": String(p.district),
-        "{{troop}}": String(p.troop ?? ""),
-        "{{meeting}}": meetingCode,
-        "{{qr_url}}": `${origin}/qr?meeting=${encodeURIComponent(meetingCode)}&id=${encodeURIComponent(
-          p.id
-        )}&name=${encodeURIComponent(p.name)}`,
+    // テンプレ差し込みはクライアントと同じ関数を使用
+    const rows = participants.map((p) => {
+      const qrUrl = buildPreviewQrUrl(origin, meetingCode, p.id); // ← 共有関数で絶対URL生成
+      const vars = {
+        name: p.name,
+        meeting: meetingCode,
+        qr_url: qrUrl,
+        troop: String(p.troop ?? ""),
+        district: String(p.district ?? ""),
       };
       return {
         participantId: p.id,
         meetingCode,
         to: p.email as string,
-        subject: fill(subjectTpl, map),
-        body: fill(bodyTpl, map),
+        subject: renderTemplate(subjectTpl, vars),
+        body: renderTemplate(bodyTpl, vars),
         status: EmailStatus.PENDING,
       };
     });
 
-    // まとめて投入（status まで付与）
-    await prisma.emailQueue.createMany({ data: queueRows });
+    await prisma.emailQueue.createMany({
+      data: rows,
+      // unique制約がある場合は有効化すると重複投入を回避できます
+      // skipDuplicates: true,
+    });
 
     return NextResponse.json({
       ok: true,
-      enqueued: queueRows.length,
+      enqueued: rows.length,
       skipped: ids.length - participants.length,
     });
   } catch (e: any) {

@@ -1,11 +1,12 @@
+// src/app/exec/meetings/qr/email/EmailQRClient.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ChevronDown, Send, MailCheck, Loader2, Filter, QrCode } from "lucide-react";
+import { ChevronDown, Send, MailCheck, Loader2, Filter, QrCode, AlertTriangle } from "lucide-react";
 import QRCode from "qrcode";
-import { renderTemplate } from "@/src/lib/mailTemplate"
-import { buildPreviewQrUrl, buildQrPayload } from "@/src/lib/qr"; // ← 修正
+import { renderTemplate } from "@/src/lib/mailTemplate";
+import { buildPreviewQrUrl, buildQrPayload } from "@/src/lib/qr";
 
 type Participant = {
   id: string;
@@ -14,6 +15,15 @@ type Participant = {
   district: string;
   rsAge: number | null;
   email?: string | null;
+};
+
+type SendFailure = {
+  id: string;
+  to: string;
+  error: string;
+  reason: string;
+  code?: any;
+  respCode?: any;
 };
 
 export default function EmailQRClient() {
@@ -46,7 +56,10 @@ export default function EmailQRClient() {
   const [sending, setSending] = useState(false);
   const [queued, setQueued] = useState<{ ok: number; ng: number } | null>(null);
   const [sentReport, setSentReport] = useState<{ sent: number; failed: number; remaining: number } | null>(null);
+  const [lastFailures, setLastFailures] = useState<SendFailure[] | null>(null);
+  const [hints, setHints] = useState<string[] | null>(null);
 
+  // 初期ロード
   useEffect(() => {
     (async () => {
       try {
@@ -68,8 +81,9 @@ export default function EmailQRClient() {
         setList(Array.isArray(j?.items) ? j.items : []);
       } catch {}
     })();
-  }, [meetingParam]);
+  }, [meetingParam]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // フィルタリング
   const filtered = useMemo(() => {
     const key = q.trim().toLowerCase();
     let arr = list;
@@ -80,6 +94,7 @@ export default function EmailQRClient() {
     );
   }, [q, list, onlyHasEmail]);
 
+  // 選択管理
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const allChecked = filtered.length > 0 && filtered.every((p) => selected[p.id]);
   const anyChecked = filtered.some((p) => selected[p.id]);
@@ -97,12 +112,15 @@ export default function EmailQRClient() {
     }
   };
 
+  // キュー投入
   const enqueueBulk = async () => {
     if (!meeting) return alert("定例会コードを選択してください");
     if (selectedIds.length === 0) return alert("送信対象を選んでください");
     setSending(true);
     setQueued(null);
     setSentReport(null);
+    setLastFailures(null);
+    setHints(null);
     try {
       const res = await fetch("/api/meetings/qr/email/bulk", {
         method: "POST",
@@ -124,9 +142,12 @@ export default function EmailQRClient() {
     }
   };
 
+  // 即送信
   const sendNow = async (max = 100) => {
     setSending(true);
     setSentReport(null);
+    setLastFailures(null);
+    setHints(null);
     try {
       const res = await fetch("/api/meetings/qr/email/send", {
         method: "POST",
@@ -135,7 +156,15 @@ export default function EmailQRClient() {
       });
       const j = await res.json();
       if (!res.ok) throw new Error(j?.message || j?.error || `send failed: ${res.status}`);
-      setSentReport({ sent: Number(j?.sent || 0), failed: Number(j?.failed || 0), remaining: Number(j?.remaining || 0) });
+
+      setSentReport({
+        sent: Number(j?.sent || 0),
+        failed: Number(j?.failed || 0),
+        remaining: Number(j?.remaining || 0),
+      });
+
+      if (Array.isArray(j?.failures)) setLastFailures(j.failures as SendFailure[]);
+      if (Array.isArray(j?.hints)) setHints(j.hints as string[]);
     } catch (e: any) {
       alert(e?.message || "送信に失敗しました");
     } finally {
@@ -143,11 +172,10 @@ export default function EmailQRClient() {
     }
   };
 
-  // 右側プレビュー：対象者
+  // プレビュー関連
   const previewTarget = filtered.find((p) => selected[p.id]) || filtered[0];
   const [qrPreviewUrl, setQrPreviewUrl] = useState<string>("");
 
-  // QR画像（ペイロードは buildQrPayload を使って同期生成）
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -163,10 +191,11 @@ export default function EmailQRClient() {
         if (alive) setQrPreviewUrl("");
       }
     })();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [previewTarget?.id, previewTarget?.name, meeting]);
 
-  // 件名/本文プレビュー（qr_url は同期で作るプレビュー用URL）
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const previewQrUrl = previewTarget && meeting ? buildPreviewQrUrl(origin, meeting, previewTarget.id) : "";
 
@@ -194,7 +223,9 @@ export default function EmailQRClient() {
               title="定例会を選択"
             >
               {meetingCodes.map((c) => (
-                <option key={c} value={c}>{c}</option>
+                <option key={c} value={c}>
+                  {c}
+                </option>
               ))}
             </select>
             <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -259,7 +290,9 @@ export default function EmailQRClient() {
                   <div className="min-w-0">
                     <div className="font-medium text-slate-900">
                       {p.name}
-                      <span className="ml-2 text-xs text-slate-500">{p.district} / {p.troop}</span>
+                      <span className="ml-2 text-xs text-slate-500">
+                        {p.district} / {p.troop}
+                      </span>
                     </div>
                     <div className="text-xs text-slate-500 break-all">{p.email || "（メール未登録）"}</div>
                   </div>
@@ -328,6 +361,33 @@ export default function EmailQRClient() {
             </span>
           )}
         </div>
+
+        {/* 失敗のヒント */}
+        {hints && hints.length > 0 && (
+          <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            <AlertTriangle className="h-4 w-4 mt-0.5" />
+            <div>
+              <b>ヒント:</b> {hints.join(" / ")}
+            </div>
+          </div>
+        )}
+
+        {/* 詳細（折りたたみ） */}
+        {lastFailures && lastFailures.length > 0 && (
+          <details className="mt-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
+            <summary className="cursor-pointer text-sm text-slate-700">
+              失敗の詳細（{lastFailures.length}件）
+            </summary>
+            <ul className="mt-2 space-y-1 text-xs text-slate-600">
+              {lastFailures.map((f) => (
+                <li key={f.id} className="break-all">
+                  <b>{f.to}</b> … {f.reason}{" "}
+                  <span className="text-slate-400">({f.error})</span>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
       </div>
 
       {/* 右：プレビュー */}
