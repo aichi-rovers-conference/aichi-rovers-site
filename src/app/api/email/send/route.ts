@@ -42,7 +42,7 @@ function classifySmtpError(msg: string) {
 export async function POST(req: NextRequest) {
   try {
     // ---- 認証 ----
-    const jar = cookies();
+    const jar = await cookies();
     const token = jar.get(COOKIE_NAME)?.value ?? "";
     const me = token ? await verifyToken(token) : null;
     if (!me) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
