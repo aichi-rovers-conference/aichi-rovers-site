@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 
@@ -8,13 +8,20 @@ export const revalidate = 0;
 
 /* ================= ユーティリティ ================= */
 
+const LAYOUTS = ["grid", "slideshow"] as const;
+type Layout = (typeof LAYOUTS)[number];
+
+function asLayout(v: unknown): Layout | null {
+  const s = String(v ?? "").toLowerCase();
+  return LAYOUTS.includes(s as Layout) ? (s as Layout) : null;
+}
+
 function fiscalYearFromReiwa(reiwa: number) {
   // 2019 = 令和1
   return 2018 + Math.max(1, reiwa);
 }
 
 function isReiwaSlug(slug: string) {
-  // r7-3 / R7-3 など
   const m = slug.match(/^r(\d+)-(\d+)$/i);
   if (!m) return null;
   return { reiwa: Number(m[1]), round: Number(m[2]) };
@@ -22,7 +29,6 @@ function isReiwaSlug(slug: string) {
 
 function coerceJstDate(input: unknown): Date {
   const s = String(input ?? "").trim();
-  // "YYYY-MM-DD" は JST の 00:00 で固定
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return new Date(`${s}T00:00:00.000+09:00`);
   const d = new Date(s);
   return isNaN(d.valueOf()) ? new Date() : d;
@@ -32,14 +38,6 @@ function emptyToNull<T>(v: T): T | null {
   return typeof v === "string" && v.trim() === "" ? null : (v as any);
 }
 
-const LAYOUTS = ["grid", "slideshow"] as const;
-type Layout = (typeof LAYOUTS)[number];
-function asLayout(v: unknown): Layout | null {
-  const s = String(v ?? "").toLowerCase();
-  return LAYOUTS.includes(s as Layout) ? (s as Layout) : null;
-}
-
-/** Update 用：undefined は「変更しない」 */
 function toUpdateData(raw: any): Prisma.MeetingReportUpdateInput {
   const layout =
     raw?.pageGalleryLayout === undefined ? undefined : asLayout(raw?.pageGalleryLayout);
@@ -51,19 +49,19 @@ function toUpdateData(raw: any): Prisma.MeetingReportUpdateInput {
     round: typeof raw?.round === "number" ? raw.round : undefined,
 
     isPublished: raw?.isPublished != null ? Boolean(raw.isPublished) : undefined,
-    // 公開に切り替えた時だけ publishedAt を上書き
+    // 公開切替時のみタイムスタンプ
     publishedAt: raw?.isPublished === true ? new Date() : undefined,
 
     reportUrl: raw?.reportUrl !== undefined ? emptyToNull(raw.reportUrl) : undefined,
     coverUrl: raw?.coverUrl !== undefined ? emptyToNull(raw.coverUrl) : undefined,
     youtubeId: raw?.youtubeId !== undefined ? emptyToNull(raw.youtubeId) : undefined,
-
-    // lead / schedule / sections / groups など JSON 項目
     lead: raw?.lead !== undefined ? emptyToNull(raw.lead) : undefined,
+
     pageGallery: Array.isArray(raw?.pageGallery)
       ? (raw.pageGallery as Prisma.InputJsonValue)
       : undefined,
-    pageGalleryLayout: layout === undefined ? undefined : (layout as any), // DB が String? でも OK
+    pageGalleryLayout: layout === undefined ? undefined : (layout as any),
+
     sections: Array.isArray(raw?.sections)
       ? (raw.sections as Prisma.InputJsonValue)
       : undefined,
@@ -77,7 +75,6 @@ function toUpdateData(raw: any): Prisma.MeetingReportUpdateInput {
   };
 }
 
-/** Create 用：必須項目は明示。空は null に正規化 */
 function toCreateData(slug: string, raw: any): Prisma.MeetingReportCreateInput {
   return {
     slug,
@@ -102,26 +99,34 @@ function toCreateData(slug: string, raw: any): Prisma.MeetingReportCreateInput {
   };
 }
 
+function getSlugFromCtx(context: any, req: Request): string {
+  const s = context?.params?.slug ?? null;
+  if (typeof s === "string" && s) return decodeURIComponent(s);
+  // 念のため URL からフォールバック
+  try {
+    const u = new URL(req.url);
+    const parts = u.pathname.split("/");
+    return decodeURIComponent(parts[parts.length - 1] || "");
+  } catch {
+    return "";
+  }
+}
+
 /* ================= ハンドラ ================= */
 
-// GET: 公開済みのみ返す（r{令和}-{回} も解釈）
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: { slug: string } }
-) {
+// GET: 公開済みのみ
+export async function GET(req: Request, context: any) {
+  const slug = getSlugFromCtx(context, req);
   try {
-    const slug = decodeURIComponent(params.slug);
-
-    // r{令和}-{回} → 年度+回で検索（公開のみ）
     const rew = isReiwaSlug(slug);
-    let data = null as any;
+    let data: any = null;
+
     if (rew) {
       const fiscalYear = fiscalYearFromReiwa(rew.reiwa);
       data = await prisma.meetingReport.findFirst({
         where: { fiscalYear, round: rew.round, isPublished: true },
       });
     }
-    // 通常の slug（公開のみ）
     if (!data) {
       data = await prisma.meetingReport.findFirst({
         where: { slug, isPublished: true },
@@ -138,12 +143,9 @@ export async function GET(
   }
 }
 
-// PUT: r{令和}-{回} なら年度/回で upsert、それ以外は slug 一意で upsert
-export async function PUT(
-  req: NextRequest,
-  { params }: { params: { slug: string } }
-) {
-  const slug = decodeURIComponent(params.slug);
+// PUT: upsert（r{令和}-{回} → 年度+回）
+export async function PUT(req: Request, context: any) {
+  const slug = getSlugFromCtx(context, req);
   const raw = await req.json().catch(() => ({}));
   try {
     const rew = isReiwaSlug(slug);
@@ -163,12 +165,9 @@ export async function PUT(
         return NextResponse.json({ ok: true, slug, data: saved });
       }
 
-      const createData = toCreateData(slug, {
-        ...raw,
-        fiscalYear,
-        round: rew.round,
+      const saved = await prisma.meetingReport.create({
+        data: toCreateData(slug, { ...raw, fiscalYear, round: rew.round }),
       });
-      const saved = await prisma.meetingReport.create({ data: createData });
       return NextResponse.json({ ok: true, slug, data: saved });
     }
 
@@ -186,8 +185,7 @@ export async function PUT(
       return NextResponse.json({ ok: true, slug, data: saved });
     }
 
-    const createData = toCreateData(slug, raw);
-    const saved = await prisma.meetingReport.create({ data: createData });
+    const saved = await prisma.meetingReport.create({ data: toCreateData(slug, raw) });
     return NextResponse.json({ ok: true, slug, data: saved });
   } catch (e: any) {
     console.error("[PUT /api/meeting-reports/[slug]]", e);
@@ -195,12 +193,9 @@ export async function PUT(
   }
 }
 
-// PATCH: 既存があれば更新、無ければ作成（slug ベース／r形式は年度+回）
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: { slug: string } }
-) {
-  const slug = decodeURIComponent(params.slug);
+// PATCH: 既存なら更新、なければ作成
+export async function PATCH(req: Request, context: any) {
+  const slug = getSlugFromCtx(context, req);
   const raw = await req.json().catch(() => ({}));
   try {
     const rew = isReiwaSlug(slug);
@@ -233,9 +228,7 @@ export async function PATCH(
     });
 
     if (!existing) {
-      const created = await prisma.meetingReport.create({
-        data: toCreateData(slug, raw),
-      });
+      const created = await prisma.meetingReport.create({ data: toCreateData(slug, raw) });
       return NextResponse.json({ ok: true, slug, data: created });
     }
 
@@ -250,12 +243,9 @@ export async function PATCH(
   }
 }
 
-// DELETE: r形式なら 年度+回、通常は slug で削除
-export async function DELETE(
-  _req: NextRequest,
-  { params }: { params: { slug: string } }
-) {
-  const slug = decodeURIComponent(params.slug);
+// DELETE: r形式は年度+回、通常は slug
+export async function DELETE(_req: Request, context: any) {
+  const slug = getSlugFromCtx(context, _req);
   try {
     const rew = isReiwaSlug(slug);
 
@@ -282,6 +272,5 @@ export async function DELETE(
 }
 
 export async function OPTIONS() {
-  // 必要に応じて CORS ヘッダをここで付与してもOK
   return NextResponse.json({}, { status: 204 });
 }
