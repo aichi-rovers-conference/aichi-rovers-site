@@ -149,13 +149,6 @@ export default function QRScanClient() {
           <Camera className="h-4 w-4" />
           カメラ開始
         </button>
-        <Link
-          href={LIST_URL}
-          className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm bg-slate-900 text-white"
-        >
-          <List className="h-4 w-4" />
-          QRリストへ
-        </Link>
         <button
           onClick={() => setHistOpen(true)}
           className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold shadow-sm bg-white text-slate-900 ring-1 ring-slate-200"
@@ -232,13 +225,7 @@ export default function QRScanClient() {
             停止
           </button>
 
-          <Link
-            href={LIST_URL}
-            className="min-w-0 flex-1 shrink-0 basis-0 inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold shadow-sm bg-white/90 text-slate-900 backdrop-blur whitespace-nowrap"
-          >
-            <List className="h-4 w-4" />
-            QRリスト
-          </Link>
+          
 
           <button
             onClick={() => setHistOpen(true)}
