@@ -52,26 +52,32 @@ model GameScore {
 }
 
 model MeetingReport {
-  id            Int       @id @default(autoincrement())
-  title         String
-  slug          String    @unique
-  date          DateTime
-  round         Int
-  fiscalYear    Int
-  reportUrl     String?
-  coverUrl      String?
-  youtubeId     String?
-  isPublished   Boolean   @default(false)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id               Int      @id @default(autoincrement())
+  slug             String   @unique
+  title            String
+  date             DateTime
+  fiscalYear       Int
+  round            Int
+  isPublished      Boolean  @default(false)
+  publishedAt      DateTime?
+  coverUrl         String?
+  youtubeId        String?
+  reportUrl        String?
+  subtitle         String?
+  lead             String?
+  schedule         Json?
+  sections         Json?
+  pageGallery      Json?
+  pageGalleryLayout String?
+  groups           Json?
+  sectionsGroups   Json?
 
-  // 制作UIで作った内容をそのまま保存するJSON
-  pageGallery   Json?
-  groups        Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt @default(now())
 
-  // ② 追加：ページ全体ギャラリーの表示モード
-  pageGalleryLayout GalleryLayout?
+  @@unique([fiscalYear, round], name: "fiscalYear_round")
 }
+
 
 
 model User {

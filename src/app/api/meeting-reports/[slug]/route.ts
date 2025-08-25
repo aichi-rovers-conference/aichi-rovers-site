@@ -1,131 +1,276 @@
-// src/app/api/meeting-reports/[slug]/route.ts
 import { NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
-import { GalleryLayout as DbGalleryLayout } from "@prisma/client";
+import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 
-// 実行環境（Prisma を安定動作させるため）
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// キャッシュしない
 export const revalidate = 0;
 
-// "grid"/"slideshow"（大文字小文字混在可）→ Prisma enum へ
-const toDbLayout = (v: any): DbGalleryLayout | null => {
+/* ================= ユーティリティ ================= */
+
+const LAYOUTS = ["grid", "slideshow"] as const;
+type Layout = (typeof LAYOUTS)[number];
+
+function asLayout(v: unknown): Layout | null {
   const s = String(v ?? "").toLowerCase();
-  const E = DbGalleryLayout as any;
-  if (E.GRID && E.SLIDESHOW) return s === "grid" ? E.GRID : s === "slideshow" ? E.SLIDESHOW : null;
-  if (E.grid && E.slideshow) return s === "grid" ? E.grid : s === "slideshow" ? E.slideshow : null;
-  return null;
-};
-
-// DB enum → UI 値（"grid" | "slideshow"）
-const fromDbLayout = (v: any): "grid" | "slideshow" | null => {
-  if (v == null) return null;
-  const s = String(v).toLowerCase();
-  return s === "slideshow" ? "slideshow" : s === "grid" ? "grid" : null;
-};
-
-// 共通：ctx から params を安全に取り出す（Next の型に依存しない）
-function getParams(ctx: unknown): { slug: string } {
-  const { params } = (ctx as { params?: unknown }) ?? {};
-  if (!params || typeof params !== "object" || params === null) return { slug: "" };
-  const slug = decodeURIComponent(String((params as Record<string, unknown>).slug ?? ""));
-  return { slug };
+  return LAYOUTS.includes(s as Layout) ? (s as Layout) : null;
 }
 
-// ---- GET ----
-export async function GET(_req: Request, ctx: unknown) {
+function fiscalYearFromReiwa(reiwa: number) {
+  // 2019 = 令和1
+  return 2018 + Math.max(1, reiwa);
+}
+
+function isReiwaSlug(slug: string) {
+  const m = slug.match(/^r(\d+)-(\d+)$/i);
+  if (!m) return null;
+  return { reiwa: Number(m[1]), round: Number(m[2]) };
+}
+
+function coerceJstDate(input: unknown): Date {
+  const s = String(input ?? "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return new Date(`${s}T00:00:00.000+09:00`);
+  const d = new Date(s);
+  return isNaN(d.valueOf()) ? new Date() : d;
+}
+
+function emptyToNull<T>(v: T): T | null {
+  return typeof v === "string" && v.trim() === "" ? null : (v as any);
+}
+
+function toUpdateData(raw: any): Prisma.MeetingReportUpdateInput {
+  const layout =
+    raw?.pageGalleryLayout === undefined ? undefined : asLayout(raw?.pageGalleryLayout);
+
+  return {
+    title: raw?.title != null ? String(raw.title) : undefined,
+    date: raw?.date != null ? coerceJstDate(raw.date) : undefined,
+    fiscalYear: typeof raw?.fiscalYear === "number" ? raw.fiscalYear : undefined,
+    round: typeof raw?.round === "number" ? raw.round : undefined,
+
+    isPublished: raw?.isPublished != null ? Boolean(raw.isPublished) : undefined,
+    // 公開切替時のみタイムスタンプ
+    publishedAt: raw?.isPublished === true ? new Date() : undefined,
+
+    reportUrl: raw?.reportUrl !== undefined ? emptyToNull(raw.reportUrl) : undefined,
+    coverUrl: raw?.coverUrl !== undefined ? emptyToNull(raw.coverUrl) : undefined,
+    youtubeId: raw?.youtubeId !== undefined ? emptyToNull(raw.youtubeId) : undefined,
+    lead: raw?.lead !== undefined ? emptyToNull(raw.lead) : undefined,
+
+    pageGallery: Array.isArray(raw?.pageGallery)
+      ? (raw.pageGallery as Prisma.InputJsonValue)
+      : undefined,
+    pageGalleryLayout: layout === undefined ? undefined : (layout as any),
+
+    sections: Array.isArray(raw?.sections)
+      ? (raw.sections as Prisma.InputJsonValue)
+      : undefined,
+    groups: Array.isArray(raw?.groups) ? (raw.groups as Prisma.InputJsonValue) : undefined,
+    schedule: Array.isArray(raw?.schedule)
+      ? (raw.schedule as Prisma.InputJsonValue)
+      : undefined,
+    sectionsGroups: Array.isArray(raw?.sectionsGroups)
+      ? (raw.sectionsGroups as Prisma.InputJsonValue)
+      : undefined,
+  };
+}
+
+function toCreateData(slug: string, raw: any): Prisma.MeetingReportCreateInput {
+  return {
+    slug,
+    title: String(raw?.title ?? ""),
+    date: coerceJstDate(raw?.date),
+    fiscalYear: Number(raw?.fiscalYear),
+    round: Number(raw?.round),
+    isPublished: Boolean(raw?.isPublished),
+    publishedAt: raw?.isPublished ? new Date() : null,
+
+    reportUrl: emptyToNull(raw?.reportUrl),
+    coverUrl: emptyToNull(raw?.coverUrl),
+    youtubeId: emptyToNull(raw?.youtubeId),
+    lead: emptyToNull(raw?.lead),
+
+    pageGallery: (Array.isArray(raw?.pageGallery) ? raw.pageGallery : []) as Prisma.InputJsonValue,
+    pageGalleryLayout: (asLayout(raw?.pageGalleryLayout) ?? "grid") as any,
+    sections: (Array.isArray(raw?.sections) ? raw.sections : []) as Prisma.InputJsonValue,
+    groups: (Array.isArray(raw?.groups) ? raw.groups : []) as Prisma.InputJsonValue,
+    schedule: (Array.isArray(raw?.schedule) ? raw.schedule : []) as Prisma.InputJsonValue,
+    sectionsGroups: (Array.isArray(raw?.sectionsGroups) ? raw.sectionsGroups : []) as Prisma.InputJsonValue,
+  };
+}
+
+function getSlugFromCtx(context: any, req: Request): string {
+  const s = context?.params?.slug ?? null;
+  if (typeof s === "string" && s) return decodeURIComponent(s);
+  // 念のため URL からフォールバック
   try {
-    const { slug } = getParams(ctx);
-    if (!slug) {
-      return NextResponse.json({ ok: false, message: "Bad request" }, { status: 400 });
-    }
-
-    const report = await prisma.meetingReport.findUnique({
-      where: { slug },
-      select: {
-        id: true,
-        title: true,
-        slug: true,
-        date: true,
-        fiscalYear: true,
-        round: true,
-        reportUrl: true,
-        coverUrl: true,
-        youtubeId: true,
-        isPublished: true,
-        updatedAt: true,
-        pageGallery: true,
-        groups: true,             // 本文セクション(JSON)
-        pageGalleryLayout: true,  // enum
-      },
-    });
-
-    if (!report) {
-      return NextResponse.json({ ok: false, message: "Not found" }, { status: 404 });
-    }
-
-    return NextResponse.json({
-      ok: true,
-      data: {
-        ...report,
-        pageGalleryLayout: fromDbLayout(report.pageGalleryLayout),
-      },
-    });
-  } catch (err) {
-    console.error("[GET /api/meeting-reports/[slug]]", err);
-    return NextResponse.json({ ok: false, message: "Internal error" }, { status: 500 });
+    const u = new URL(req.url);
+    const parts = u.pathname.split("/");
+    return decodeURIComponent(parts[parts.length - 1] || "");
+  } catch {
+    return "";
   }
 }
 
-// ---- PUT ----
-export async function PUT(req: Request, ctx: unknown) {
+/* ================= ハンドラ ================= */
+
+// GET: 公開済みのみ
+export async function GET(req: Request, context: any) {
+  const slug = getSlugFromCtx(context, req);
   try {
-    const { slug } = getParams(ctx);
-    if (!slug) {
-      return NextResponse.json({ ok: false, message: "Bad request" }, { status: 400 });
+    const rew = isReiwaSlug(slug);
+    let data: any = null;
+
+    if (rew) {
+      const fiscalYear = fiscalYearFromReiwa(rew.reiwa);
+      data = await prisma.meetingReport.findFirst({
+        where: { fiscalYear, round: rew.round, isPublished: true },
+      });
+    }
+    if (!data) {
+      data = await prisma.meetingReport.findFirst({
+        where: { slug, isPublished: true },
+      });
     }
 
-    const body = await req.json();
-
-    // UI 側は sections で送ってくる想定（後方互換で groups も許可）
-    const groups =
-      Array.isArray(body.sections) ? body.sections :
-      Array.isArray(body.groups) ? body.groups : [];
-
-    const updated = await prisma.meetingReport.update({
-      where: { slug },
-      data: {
-        title: body.title,
-        date: body.date ? new Date(body.date) : undefined,
-        round: body.round,
-        fiscalYear: body.fiscalYear,
-        reportUrl: body.reportUrl ?? null,
-        coverUrl: body.coverUrl ?? null,
-        youtubeId: body.youtubeId ?? null,
-        isPublished: !!body.isPublished,
-        pageGallery: body.pageGallery ?? [],
-        groups, // 子ギャラリーの layout も JSON に含まれて保存
-        pageGalleryLayout: { set: toDbLayout(body.pageGalleryLayout) }, // enum を安全にセット
-      },
-      select: {
-        id: true,
-        slug: true,
-        isPublished: true,
-        pageGalleryLayout: true,
-        updatedAt: true,
-      },
-    });
-
-    return NextResponse.json({
-      ok: true,
-      data: {
-        ...updated,
-        pageGalleryLayout: fromDbLayout(updated.pageGalleryLayout),
-      },
-    });
-  } catch (err) {
-    console.error("[PUT /api/meeting-reports/[slug]]", err);
-    return NextResponse.json({ ok: false, message: "Internal error" }, { status: 500 });
+    if (!data) {
+      return NextResponse.json({ ok: false, message: "not found" }, { status: 404 });
+    }
+    return NextResponse.json({ ok: true, data });
+  } catch (e: any) {
+    console.error("[GET /api/meeting-reports/[slug]]", e);
+    return NextResponse.json({ ok: false, message: e?.message ?? "get failed" }, { status: 500 });
   }
+}
+
+// PUT: upsert（r{令和}-{回} → 年度+回）
+export async function PUT(req: Request, context: any) {
+  const slug = getSlugFromCtx(context, req);
+  const raw = await req.json().catch(() => ({}));
+  try {
+    const rew = isReiwaSlug(slug);
+
+    if (rew) {
+      const fiscalYear = fiscalYearFromReiwa(rew.reiwa);
+      const existing = await prisma.meetingReport.findFirst({
+        where: { fiscalYear, round: rew.round },
+        select: { id: true },
+      });
+
+      if (existing) {
+        const saved = await prisma.meetingReport.update({
+          where: { id: existing.id },
+          data: toUpdateData(raw),
+        });
+        return NextResponse.json({ ok: true, slug, data: saved });
+      }
+
+      const saved = await prisma.meetingReport.create({
+        data: toCreateData(slug, { ...raw, fiscalYear, round: rew.round }),
+      });
+      return NextResponse.json({ ok: true, slug, data: saved });
+    }
+
+    // 通常 slug
+    const existing = await prisma.meetingReport.findFirst({
+      where: { slug },
+      select: { id: true },
+    });
+
+    if (existing) {
+      const saved = await prisma.meetingReport.update({
+        where: { id: existing.id },
+        data: toUpdateData(raw),
+      });
+      return NextResponse.json({ ok: true, slug, data: saved });
+    }
+
+    const saved = await prisma.meetingReport.create({ data: toCreateData(slug, raw) });
+    return NextResponse.json({ ok: true, slug, data: saved });
+  } catch (e: any) {
+    console.error("[PUT /api/meeting-reports/[slug]]", e);
+    return NextResponse.json({ ok: false, message: e?.message ?? "put failed" }, { status: 500 });
+  }
+}
+
+// PATCH: 既存なら更新、なければ作成
+export async function PATCH(req: Request, context: any) {
+  const slug = getSlugFromCtx(context, req);
+  const raw = await req.json().catch(() => ({}));
+  try {
+    const rew = isReiwaSlug(slug);
+
+    if (rew) {
+      const fiscalYear = fiscalYearFromReiwa(rew.reiwa);
+      const existing = await prisma.meetingReport.findFirst({
+        where: { fiscalYear, round: rew.round },
+        select: { id: true },
+      });
+
+      if (existing) {
+        const saved = await prisma.meetingReport.update({
+          where: { id: existing.id },
+          data: toUpdateData(raw),
+        });
+        return NextResponse.json({ ok: true, slug, data: saved });
+      }
+
+      const created = await prisma.meetingReport.create({
+        data: toCreateData(slug, { ...raw, fiscalYear, round: rew.round }),
+      });
+      return NextResponse.json({ ok: true, slug, data: created });
+    }
+
+    // 通常 slug
+    const existing = await prisma.meetingReport.findFirst({
+      where: { slug },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      const created = await prisma.meetingReport.create({ data: toCreateData(slug, raw) });
+      return NextResponse.json({ ok: true, slug, data: created });
+    }
+
+    const saved = await prisma.meetingReport.update({
+      where: { id: existing.id },
+      data: toUpdateData(raw),
+    });
+    return NextResponse.json({ ok: true, slug, data: saved });
+  } catch (e: any) {
+    console.error("[PATCH /api/meeting-reports/[slug]]", e);
+    return NextResponse.json({ ok: false, message: e?.message ?? "patch failed" }, { status: 500 });
+  }
+}
+
+// DELETE: r形式は年度+回、通常は slug
+export async function DELETE(_req: Request, context: any) {
+  const slug = getSlugFromCtx(context, _req);
+  try {
+    const rew = isReiwaSlug(slug);
+
+    if (rew) {
+      const fiscalYear = fiscalYearFromReiwa(rew.reiwa);
+      const existing = await prisma.meetingReport.findFirst({
+        where: { fiscalYear, round: rew.round },
+        select: { id: true },
+      });
+      if (existing) await prisma.meetingReport.delete({ where: { id: existing.id } });
+      return NextResponse.json({ ok: true, slug });
+    }
+
+    const existing = await prisma.meetingReport.findFirst({
+      where: { slug },
+      select: { id: true },
+    });
+    if (existing) await prisma.meetingReport.delete({ where: { id: existing.id } });
+    return NextResponse.json({ ok: true, slug });
+  } catch (e: any) {
+    console.error("[DELETE /api/meeting-reports/[slug]]", e);
+    return NextResponse.json({ ok: false, message: e?.message ?? "delete failed" }, { status: 500 });
+  }
+}
+
+export async function OPTIONS() {
+  return NextResponse.json({}, { status: 204 });
 }

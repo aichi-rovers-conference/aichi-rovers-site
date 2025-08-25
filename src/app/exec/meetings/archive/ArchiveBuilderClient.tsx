@@ -1,6 +1,7 @@
 // app/exec/meetings/archive/ArchiveBuilderClient.tsx
 "use client";
 
+import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import TopMediaPicker from "./components/TopMediaPicker";
 import PageGalleryEditor, { type GalleryLayout } from "./components/PageGalleryEditor";
@@ -33,28 +34,118 @@ function SectionCard({
   );
 }
 
+// ▼ 令和年→スラッグ r{令和}-{回} を作る
+function buildRSlug(fy?: number, round?: number) {
+  if (!fy || !round) return null;
+  const reiwa = Math.max(1, fy - 2018); // 2019=令和1
+  return `r${reiwa}-${round}`;
+}
+function buildPreviewUrl(fy?: number, round?: number, reportUrl?: string | null) {
+  const explicit = (reportUrl ?? "").trim();
+  if (explicit) return explicit;
+  const slug = buildRSlug(fy, round);
+  return slug ? `/arc/conference/reports/${slug}` : `/arc/conference/reports`;
+}
+
 export default function ArchiveBuilderClient() {
   const {
     form, change,
     fyOptsDesc,
-    topMediaType, setTopMediaType, onYouTubeChange, onCoverFile,
+    topMediaType, setTopMediaType, onYouTubeChange,
     status,
-    loading, loadingExisting, uploadingCover, uploadingMap,
-    addPagePhoto, updatePagePhoto, rmPagePhoto, onPagePhotoFile,
+    loading, loadingExisting,
+    uploadingCover, uploadingMap,
+    addPagePhoto, updatePagePhoto, rmPagePhoto,
     addGroup, updateGroup, rmGroup,
     addChildToGroup, rmChild, setChildText,
     addTimelineRow, setTimelineRow, rmTimelineRow,
     addChildImage, setChildImage, rmChildImage, onChildImageFile,
-    /** 子ギャラリーのレイアウト保存用（useReportForm で実装済み想定） */
     setChildGalleryLayout,
     save, previewUrl, saveModal, setSaveModal, copyLink, copied,
   } = useReportForm();
 
-  // ← フォームに保存されているページ全体ギャラリーのレイアウト
-  const galleryLayout: GalleryLayout = form.pageGalleryLayout ?? "grid";
+  // ← 表示用のリンクは r{令和}-{回} 規約で強制生成（reportUrl があればそちらを優先）
+  const computedPreviewUrl = buildPreviewUrl(
+    form.fiscalYear as number | undefined,
+    form.round as number | undefined,
+    form.reportUrl
+  );
 
-  // ← setPageGalleryLayout を使わず、フォームを直接更新（型エラー回避・機能維持）
+  const [localCoverUploading, setLocalCoverUploading] = useState(false);
+  const [localUploadingMap, setLocalUploadingMap] = useState<Record<string, boolean>>({});
+
+  const uploadToServer = async (file: File) => {
+    const fd = new FormData();
+    fd.append("file", file, file.name);
+    const res = await fetch("/api/uploads", { method: "POST", body: fd });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || !json?.ok || !json?.url) {
+      throw new Error(json?.message ?? `Upload failed (status ${res.status})`);
+    }
+    return json as { url: string; name?: string; size?: number; contentType?: string };
+  };
+
+  const handleCoverInput: React.ChangeEventHandler<HTMLInputElement> = async (e) => {
+    const input = e.currentTarget;
+    const f = input.files?.[0];
+    if (!f) return;
+
+    setLocalCoverUploading(true);
+    try {
+      const { url } = await uploadToServer(f);
+      change("coverUrl", url);
+    } catch (err: any) {
+      console.error(err);
+      alert(err?.message ?? "カバー画像のアップロードに失敗しました");
+    } finally {
+      setTimeout(() => {
+        if (input) input.value = "";
+      }, 0);
+      setLocalCoverUploading(false);
+    }
+  };
+
+  const handleGalleryFile = async (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.currentTarget;
+    const f = input.files?.[0];
+    if (!f) return;
+
+    setLocalUploadingMap((m) => ({ ...m, [id]: true }));
+    try {
+      const { url } = await uploadToServer(f);
+
+      const curr = Array.isArray(form.pageGallery) ? [...form.pageGallery] : [];
+      const idx = curr.findIndex((it: any) => it?.id === id);
+      if (idx >= 0) {
+        const before = curr[idx] as any;
+        curr[idx] = { ...before, url, alt: (f as any)?.name ?? "" };
+      } else {
+        curr.push({ id, url, alt: (f as any)?.name ?? "" } as any);
+      }
+      change("pageGallery", curr as any);
+    } catch (err: any) {
+      console.error(err);
+      alert(err?.message ?? "画像のアップロードに失敗しました");
+    } finally {
+      setLocalUploadingMap((m) => {
+        const n = { ...m }; delete n[id]; return n;
+      });
+      setTimeout(() => {
+        if (input) input.value = "";
+      }, 0);
+    }
+  };
+
+  const galleryLayout: GalleryLayout = (form.pageGalleryLayout as GalleryLayout) ?? "grid";
   const handleSetPageGalleryLayout = (v: GalleryLayout) => change("pageGalleryLayout", v);
+
+  const isUploading = useMemo(() => {
+    const localAny = localCoverUploading || Object.values(localUploadingMap).some(Boolean);
+    const hookAny =
+      Boolean(uploadingCover) ||
+      Boolean(uploadingMap && Object.values(uploadingMap as Record<string, boolean>).some(Boolean));
+    return localAny || hookAny;
+  }, [localCoverUploading, localUploadingMap, uploadingCover, uploadingMap]);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-white to-slate-50 max-w-[100vw] overflow-x-clip">
@@ -65,8 +156,8 @@ export default function ArchiveBuilderClient() {
             <h1 className="text-2xl font-bold">定例会レポート編集（制作）</h1>
             <p className="text-slate-600 text-sm break-all">
               公開ページ：{" "}
-              <a className="underline" href={previewUrl} target="_blank" rel="noreferrer">
-                {previewUrl}
+              <a className="underline" href={computedPreviewUrl} target="_blank" rel="noreferrer">
+                {computedPreviewUrl}
               </a>
             </p>
             {loadingExisting && <p className="text-xs text-slate-500 mt-1">既存データを読み込み中…</p>}
@@ -84,10 +175,10 @@ export default function ArchiveBuilderClient() {
               whileHover={{ y: -1, scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               onClick={save}
-              disabled={loading || !form.title.trim()}
+              disabled={loading || isUploading || !form.title.trim()}
               className="rounded-xl bg-indigo-600 px-4 py-2 text-white shadow disabled:opacity-50"
             >
-              {loading ? "保存中…" : "保存"}
+              {loading ? "保存中…" : isUploading ? "画像の反映待ち…" : "保存"}
             </motion.button>
           </div>
         </header>
@@ -100,6 +191,12 @@ export default function ArchiveBuilderClient() {
             }`}
           >
             {status.msg}
+          </div>
+        )}
+
+        {isUploading && (
+          <div className="mb-4 rounded-lg bg-sky-50 text-sky-800 px-4 py-2 text-sm">
+            画像アップロード中です…完了してから保存してください。
           </div>
         )}
 
@@ -162,19 +259,23 @@ export default function ArchiveBuilderClient() {
               className="w-full rounded-lg border px-3 py-2"
               value={form.reportUrl ?? ""}
               onChange={(e) => change("reportUrl", e.target.value)}
-              placeholder="未入力時は /arc/conference/reports/[年度&回] が使われます"
+              placeholder="未入力時は /arc/conference/reports/[slug] が使われます（例: r7-1）"
             />
           </label>
         </section>
 
         {/* トップ（画像/YouTube） */}
-        <SectionCard id="top" title="トップメディア">
+        <SectionCard
+          id="top"
+          title="トップメディア"
+          right={(uploadingCover || localCoverUploading) ? <span className="text-xs text-slate-500">アップロード中…</span> : undefined}
+        >
           <TopMediaPicker
             topMediaType={topMediaType}
             setTopMediaType={setTopMediaType}
             coverUrl={form.coverUrl}
-            onCoverFile={onCoverFile}
-            uploadingCover={uploadingCover}
+            onCoverFile={handleCoverInput}
+            uploadingCover={uploadingCover || localCoverUploading}
             youtubeId={form.youtubeId}
             onYouTubeChange={onYouTubeChange}
           />
@@ -184,25 +285,21 @@ export default function ArchiveBuilderClient() {
         <SectionCard
           id="gallery"
           title="ページギャラリー"
-          right={
-            <div className="text-sm text-slate-600">
-              表示: {galleryLayout === "grid" ? "グリッド" : "スライドショー"}
-            </div>
-          }
+          right={<div className="text-sm text-slate-600">表示: {galleryLayout === "grid" ? "グリッド" : "スライドショー"}</div>}
         >
           <PageGalleryEditor
             items={form.pageGallery ?? []}
             add={addPagePhoto}
             update={updatePagePhoto}
             remove={rmPagePhoto}
-            onFile={onPagePhotoFile}
-            uploadingMap={uploadingMap}
+            onFile={handleGalleryFile}
+            uploadingMap={{ ...(uploadingMap || {}), ...localUploadingMap }}
             layout={galleryLayout}
-            setLayout={handleSetPageGalleryLayout} // ← フォームへ保存
+            setLayout={handleSetPageGalleryLayout}
           />
         </SectionCard>
 
-        {/* 本文セクション（ドラッグ入替対応） */}
+        {/* 本文セクション */}
         <SectionCard id="sections" title="本文セクション">
           <SectionsEditor
             sections={form.sections ?? []}
@@ -220,7 +317,6 @@ export default function ArchiveBuilderClient() {
             rmChildImage={rmChildImage}
             onChildImageFile={onChildImageFile}
             uploadingMap={uploadingMap}
-            /** 子ギャラリーのレイアウトも保存（useReportForm 実装が必要） */
             setChildGalleryLayout={setChildGalleryLayout}
           />
         </SectionCard>
@@ -231,14 +327,15 @@ export default function ArchiveBuilderClient() {
             whileHover={{ y: -1, scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             onClick={save}
-            className="rounded-xl bg-indigo-600 px-4 py-2 text-white shadow"
+            disabled={loading || isUploading || !form.title.trim()}
+            className="rounded-xl bg-indigo-600 px-4 py-2 text-white shadow disabled:opacity-50"
           >
-            保存
+            {loading ? "保存中…" : isUploading ? "画像の反映待ち…" : "保存"}
           </motion.button>
         </div>
       </div>
 
-      {/* 保存完了モーダル（お疲れさまでした 画面） */}
+      {/* 保存完了モーダル */}
       <AnimatePresence>
         {saveModal && (
           <motion.div
@@ -273,8 +370,8 @@ export default function ArchiveBuilderClient() {
 
               <div className="mt-3 text-xs text-slate-500 break-all">
                 URL：{" "}
-                <a href={previewUrl} target="_blank" className="underline" rel="noreferrer">
-                  {previewUrl}
+                <a href={computedPreviewUrl} target="_blank" className="underline" rel="noreferrer">
+                  {computedPreviewUrl}
                 </a>
               </div>
 
@@ -286,7 +383,7 @@ export default function ArchiveBuilderClient() {
                   {copied ? "コピーしました" : "リンクをコピー"}
                 </button>
                 <a
-                  href={previewUrl}
+                  href={computedPreviewUrl}
                   target="_blank"
                   className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white shadow hover:bg-indigo-500"
                   rel="noreferrer"

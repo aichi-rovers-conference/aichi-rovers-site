@@ -1,5 +1,6 @@
 "use client";
 import React from "react";
+import Image from "next/image";
 
 type Props = {
   topMediaType: "image" | "youtube";
@@ -34,14 +35,29 @@ export default function TopMediaPicker({
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3">
           <div className="space-y-2 md:col-span-3">
             <span className="block text-sm font-medium">トップ画像</span>
+
             {coverUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={coverUrl} alt="" className="w-full h-48 object-cover rounded-lg border" />
+              // next/image を使い、実表示幅に合った sizes と高めの quality を指定
+              <div className="relative w-full aspect-[16/9] overflow-hidden rounded-lg border">
+                <Image
+                  src={coverUrl}
+                  alt=""
+                  fill
+                  // ページが max-w-5xl(~1024px) なので実表示は ~960px を想定
+                  sizes="(min-width:1024px) 960px, 100vw"
+                  quality={90}
+                  priority
+                  style={{ objectFit: "cover" }}
+                  // ↓検証用: もしこれで劇的にシャープになるなら最適化の再圧縮が原因
+                  // unoptimized
+                />
+              </div>
             ) : (
               <div className="flex h-48 items-center justify-center rounded-lg border border-dashed text-slate-500">
                 画像がありません
               </div>
             )}
+
             <label className="inline-flex items-center gap-2 text-sm">
               <input type="file" accept="image/*" onChange={onCoverFile} disabled={uploadingCover} />
               {uploadingCover ? "アップロード中…" : "画像ファイルを選択"}

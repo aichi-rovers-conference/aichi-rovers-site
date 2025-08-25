@@ -1,3 +1,4 @@
+// app/arc/conference/reports/[slug]/page.tsx
 import Image from "next/image";
 import Link from "next/link";
 import { headers } from "next/headers";
@@ -40,7 +41,7 @@ type ReportDetail = {
   schedule?: { time: string; label: string; note?: string }[];
   sections?: { heading?: string; body?: string }[];
   pageGallery?: GalleryItem[];
-  pageGalleryLayout?: any; // grid/slideshow or GRID/SLIDESHOW
+  pageGalleryLayout?: any;
   groups?: SectionGroup[];
   sectionsGroups?: SectionGroup[];
 };
@@ -52,9 +53,11 @@ function DateBlock({ iso }: { iso: string }) {
   const y = d.getFullYear();
   const md = `${d.getMonth() + 1}/${String(d.getDate()).padStart(2, "0")}`;
   return (
-    <div className="shrink-0 pr-4 border-r border-slate-200">
-      <div className="text-xs text-slate-500 leading-none">{y}</div>
-      <div className="text-2xl md:text-3xl font-extrabold -mt-0.5">{md}</div>
+    <div className="shrink-0 pr-4 md:pr-6 border-r border-slate-200/70">
+      <div className="text-[11px] lg:text-xs text-slate-500/80 leading-none tracking-wider uppercase">
+        {y}
+      </div>
+      <div className="text-3xl md:text-4xl font-black -mt-0.5">{md}</div>
     </div>
   );
 }
@@ -125,6 +128,30 @@ function normalizeGroups(data: ReportDetail): SectionGroup[] {
   return out;
 }
 
+/** 本文：読みやすさ最優先のタイポ設定 */
+function BodyText({ body }: { body: string }) {
+  // 2行以上の改行で段落、1行改行は <br/> として維持
+  const paras = body.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+  return (
+    <div className="max-w-3xl text-[16px] sm:text-[17px] md:text-[18px] leading-[1.9] tracking-[0.005em] text-slate-900">
+      {paras.length === 0 ? (
+        <p className="mt-4 first:mt-0">{body}</p>
+      ) : (
+        paras.map((p, i) => (
+          <p key={i} className="mt-5 first:mt-0">
+            {p.split(/\n/).map((line, j, arr) => (
+              <span key={j}>
+                {line}
+                {j < arr.length - 1 && <br />}
+              </span>
+            ))}
+          </p>
+        ))
+      )}
+    </div>
+  );
+}
+
 /** 部品描画 */
 function TopMedia({
   coverUrl,
@@ -144,7 +171,7 @@ function TopMedia({
           width={1280}
           height={720}
           sizes="(max-width:768px) 92vw, 1000px"
-          className="w-full h-auto rounded-xl border shadow-sm object-cover"
+          className="w-full h-auto rounded-xl border border-slate-200/70 shadow-md object-cover bg-slate-50"
         />
       </div>
     );
@@ -152,7 +179,7 @@ function TopMedia({
   if (youtubeId) {
     return (
       <div className="mt-6">
-        <div className="aspect-video w-full rounded-xl overflow-hidden border bg-black/5">
+        <div className="aspect-video w-full rounded-xl overflow-hidden border border-slate-200/70 bg-black/5 shadow-md">
           <iframe
             className="w-full h-full"
             src={`https://www.youtube.com/embed/${youtubeId}`}
@@ -180,36 +207,51 @@ function GroupBlock({ group }: { group: SectionGroup }) {
           <h2 className="text-[22px] md:text-2xl font-extrabold text-slate-900 tracking-tight">
             {group.heading}
           </h2>
+          {/* 赤アンダーラインを維持 */}
           <div className="mt-2 h-[3px] w-16 rounded-full bg-red-600" />
         </div>
       ) : null}
 
-      <div className="mt-4 space-y-6">
+      <div className="mt-6 space-y-8">
         {group.children.map((c) => {
           if (c.kind === "text") {
             return (
-              <div key={c.id} className="text-slate-800 leading-relaxed whitespace-pre-wrap">
-                {c.body}
+              <div key={c.id}>
+                <BodyText body={c.body} />
               </div>
             );
           }
+
           if (c.kind === "timeline") {
             const rows = c.items || [];
             if (!rows.length) return null;
+
+            // ▼ 新デザイン：左に時間ピル、右に内容カード（ドット/縦線は廃止）
             return (
-              <div key={c.id} className="divide-y rounded-xl border overflow-hidden">
+              <div key={c.id} className="space-y-3">
                 {rows.map((r) => (
-                  <div key={r.id} className="grid grid-cols-[100px,1fr] gap-4 px-4 py-3">
-                    <div className="font-mono font-semibold">{r.time}</div>
-                    <div>
-                      <div className="font-medium">{r.label}</div>
-                      {r.note && <div className="text-slate-600 text-sm mt-0.5">{r.note}</div>}
+                  <div key={r.id} className="grid grid-cols-[108px,1fr] gap-4 items-start">
+                    <div className="pt-[2px]">
+                      <span className="inline-flex h-8 min-w-[84px] items-center justify-center rounded-full bg-slate-100 px-2 font-mono text-sm font-semibold tracking-wider text-slate-700">
+                        {r.time}
+                      </span>
+                    </div>
+                    <div className="relative rounded-xl border border-slate-200/70 bg-white/90 shadow-sm">
+                      {/* カード上部に赤いアクセントバー（4px） */}
+                      <div className="absolute left-0 right-0 top-0 h-1 rounded-t-xl bg-red-600/90" />
+                      <div className="px-4 py-3">
+                        <div className="font-medium text-slate-900">{r.label}</div>
+                        {r.note && (
+                          <div className="mt-1 text-[13.5px] leading-relaxed text-slate-600">{r.note}</div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}
               </div>
             );
           }
+
           if (c.kind === "gallery") {
             const imgs = c.images || [];
             if (!imgs.length) return null;
@@ -222,19 +264,25 @@ function GroupBlock({ group }: { group: SectionGroup }) {
             ) : (
               <div key={c.id} className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 {imgs.map((im) => (
-                  <figure key={im.id} className="overflow-hidden rounded-xl border bg-white">
+                  <figure
+                    key={im.id}
+                    className="group overflow-hidden rounded-xl border border-slate-200/70 bg-white shadow-sm"
+                  >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={im.url} alt={im.caption ?? ""} className="h-64 w-full object-cover" />
+                    <img
+                      src={im.url}
+                      alt={im.caption ?? ""}
+                      className="h-64 w-full object-cover transition-transform duration-300 group-hover:scale-[1.02] bg-slate-50"
+                    />
                     {im.caption && (
-                      <figcaption className="px-3 py-2 text-sm text-slate-700">
-                        {im.caption}
-                      </figcaption>
+                      <figcaption className="px-3 py-2 text-sm text-slate-700">{im.caption}</figcaption>
                     )}
                   </figure>
                 ))}
               </div>
             );
           }
+
           return null;
         })}
       </div>
@@ -259,12 +307,12 @@ export default async function Page(ctx: { params: Promise<{ slug: string }> }) {
 
   if (!data) {
     return (
-      <main className="min-h-screen bg-white">
+      <main className="min-h-screen bg-gradient-to-b from-white to-slate-50">
         <ArcHeader1 navItems={navItems} />
         <div className="mx-auto max-w-5xl px-4 md:px-8 py-16">
           <Link
             href="/arc/conference"
-            className="inline-flex items-center gap-2 text-sm text-slate-700 hover:text-slate-900 mb-6"
+            className="mb-6 inline-flex items-center gap-2 rounded-full border border-slate-200/80 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
           >
             ← ARC定例会に戻る
           </Link>
@@ -281,67 +329,79 @@ export default async function Page(ctx: { params: Promise<{ slug: string }> }) {
   const pageLayout: GalleryLayout = normLayout(data.pageGalleryLayout) ?? "grid";
 
   return (
-    <main className="min-h-screen bg-white">
+    <main className="min-h-screen bg-gradient-to-b from-white to-slate-50">
       <ArcHeader1 navItems={navItems} />
 
       <div className="mx-auto w-full max-w-5xl px-4 md:px-8 py-6 md:py-8">
-        <div className="mb-5">
-          <Link
-            href="/arc/conference"
-            className="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm text-slate-800 hover:bg-slate-50"
-          >
-            ← ARC定例会に戻る
-          </Link>
-        </div>
-
-        <header className="flex items-end gap-4 md:gap-6">
-          <DateBlock iso={updated} />
-          <div className="min-w-0">
-            <h1 className="text-2xl md:text-3xl font-extrabold leading-tight break-words text-slate-900">
-              {data.title}
-            </h1>
-            {data.subtitle && <p className="text-slate-600 mt-1">{data.subtitle}</p>}
+        <div className="rounded-2xl border border-slate-200/70 bg-white/90 shadow-sm backdrop-blur p-4 md:p-8">
+          <div className="mb-5">
+            <Link
+              href="/arc/conference"
+              className="inline-flex items-center gap-2 rounded-full border border-slate-200/80 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+            >
+              ← ARC定例会に戻る
+            </Link>
           </div>
-        </header>
 
-        <TopMedia coverUrl={data.coverUrl} youtubeId={data.youtubeId} title={data.title} />
-
-        {data.lead && (
-          <p className="mt-6 text-slate-800 leading-relaxed whitespace-pre-wrap">{data.lead}</p>
-        )}
-
-        {/* ページ単位ギャラリー：layout に従う */}
-        {pageGallery.length > 0 && (
-          <section className="mt-10">
-            <div>
-              <h2 className="text-[22px] md:text-2xl font-extrabold text-slate-900 tracking-tight">ギャラリー</h2>
-              <div className="mt-2 h-[3px] w-16 rounded-full bg-red-600" />
+          <header className="flex items-end gap-4 md:gap-6">
+            <DateBlock iso={updated} />
+            <div className="min-w-0">
+              <h1 className="text-2xl md:text-3xl font-extrabold leading-tight break-words text-slate-900">
+                {data.title}
+              </h1>
+              {data.subtitle && <p className="mt-1 text-slate-600">{data.subtitle}</p>}
             </div>
+          </header>
 
-            <div className="mt-4">
-              {pageLayout === "slideshow" ? (
-                <GallerySlider items={pageGallery} />
-              ) : (
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  {pageGallery.map((g) => (
-                    <figure key={g.id} className="overflow-hidden rounded-xl border bg-white">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={g.url} alt={g.caption ?? ""} className="h-64 w-full object-cover" />
-                      {g.caption && (
-                        <figcaption className="px-3 py-2 text-sm text-slate-700">{g.caption}</figcaption>
-                      )}
-                    </figure>
-                  ))}
-                </div>
-              )}
-            </div>
-          </section>
-        )}
+          <TopMedia coverUrl={data.coverUrl} youtubeId={data.youtubeId} title={data.title} />
 
-        {/* 本文セクション */}
-        {groups.map((g) => (
-          <GroupBlock key={g.id} group={g} />
-        ))}
+          {data.lead && (
+            <p className="mt-6 max-w-3xl text-[16px] sm:text-[17px] md:text-[18px] leading-[1.9] tracking-[0.005em] text-slate-900 whitespace-pre-wrap">
+              {data.lead}
+            </p>
+          )}
+
+          {/* ページ単位ギャラリー：layout に従う */}
+          {pageGallery.length > 0 && (
+            <section className="mt-10">
+              <div>
+                <h2 className="text-[22px] md:text-2xl font-extrabold text-slate-900 tracking-tight">ギャラリー</h2>
+                {/* 赤アンダーラインを維持 */}
+                <div className="mt-2 h-[3px] w-16 rounded-full bg-red-600" />
+              </div>
+
+              <div className="mt-4">
+                {pageLayout === "slideshow" ? (
+                  <GallerySlider items={pageGallery} />
+                ) : (
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    {pageGallery.map((g) => (
+                      <figure
+                        key={g.id}
+                        className="group overflow-hidden rounded-xl border border-slate-200/70 bg-white shadow-sm"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={g.url}
+                          alt={g.caption ?? ""}
+                          className="h-64 w-full object-cover bg-slate-50 transition-transform duration-300 group-hover:scale-[1.02]"
+                        />
+                        {g.caption && (
+                          <figcaption className="px-3 py-2 text-sm text-slate-700">{g.caption}</figcaption>
+                        )}
+                      </figure>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+
+          {/* 本文セクション */}
+          {groups.map((g) => (
+            <GroupBlock key={g.id} group={g} />
+          ))}
+        </div>
       </div>
     </main>
   );

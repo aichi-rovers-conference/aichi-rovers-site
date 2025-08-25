@@ -1,52 +1,14 @@
 // app/exec/meetings/archive/components/SectionsEditor.tsx
 "use client";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback } from "react";
 import {
   DndContext, closestCenter, PointerSensor, useSensor, useSensors, DragEndEvent,
 } from "@dnd-kit/core";
 import { SortableContext, useSortable, arrayMove, rectSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { SectionGroup, ChildTimelineItem, GalleryItem, GalleryLayout } from "../types";
-
-/** 編集プレビュー用の軽量スライドショー */
-function MiniSlideshow({ items }: { items: GalleryItem[] }) {
-  const [idx, setIdx] = useState(0);
-  const urls = items.filter((x) => !!x.url);
-  const has = urls.length > 0;
-  const safe = has ? ((idx % urls.length) + urls.length) % urls.length : 0;
-
-  useEffect(() => {
-    if (!has) return;
-    const t = setInterval(() => setIdx((v) => v + 1), 3500);
-    return () => clearInterval(t);
-  }, [has, urls.length]);
-
-  if (!has) {
-    return (
-      <div className="flex h-48 items-center justify-center rounded-xl border border-dashed text-slate-500">
-        画像がありません
-      </div>
-    );
-  }
-
-  return (
-    <div className="relative overflow-hidden rounded-xl border border-slate-200 bg-white/90">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={urls[safe].url!} alt={urls[safe].caption ?? ""} className="h-48 w-full object-cover" />
-      <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1">
-        {urls.map((_, i) => (
-          <span key={i} className={`h-1.5 w-4 rounded-full ${i === safe ? "bg-white" : "bg-white/50"}`} />
-        ))}
-      </div>
-      <div className="pointer-events-none absolute inset-0 flex items-center justify-between p-2">
-        <button type="button" className="pointer-events-auto rounded-full bg-white/80 px-2 py-1 shadow"
-          onClick={() => setIdx((v) => v - 1)} aria-label="前へ">‹</button>
-        <button type="button" className="pointer-events-auto rounded-full bg-white/80 px-2 py-1 shadow"
-          onClick={() => setIdx((v) => v + 1)} aria-label="次へ">›</button>
-      </div>
-    </div>
-  );
-}
+import TimeInput from "@/src/app/exec/meetings/archive/components/inputs/TimeInput"; // ← ルートの TimeInput を参照
+import PageGalleryEditor from "./PageGalleryEditor";
 
 /* ========= 小物 ========= */
 function DragHandle(props: React.HTMLAttributes<HTMLButtonElement>) {
@@ -117,105 +79,41 @@ type Props = {
   onChildImageFile: (groupId: string, childId: string, imgId: string, e: React.ChangeEvent<HTMLInputElement>) => void;
   uploadingMap: Record<string, boolean>;
 
-  /** ※必須：子ギャラリーのレイアウトを保存する */
   setChildGalleryLayout: (groupId: string, childId: string, layout: GalleryLayout) => void;
 };
-
-/* ========= 時刻入力（“:”固定＆連結入力） ========= */
-function toHalf(s: string) {
-  return s.replace(/[！-～]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)).replace("：", ":");
-}
-function clamp(n: number, min: number, max: number) { return Math.min(max, Math.max(min, n)); }
-function two(n: number) { return String(n).padStart(2, "0"); }
-function digitsToHHMM(digits: string): string {
-  const d = digits.replace(/\D/g, "").slice(0, 4);
-  if (d.length === 0) return "00:00";
-  if (d.length <= 2) return d.padStart(2, "0") + ":00";
-  return d.slice(0, 2).padStart(2, "0") + ":" + d.slice(2).padEnd(2, "0");
-}
-
-function TimeInput({
-  value,
-  onChange,
-  onEnter,
-  className,
-}: {
-  value: string | undefined;
-  onChange: (hhmm: string) => void;
-  onEnter?: () => void;
-  className?: string;
-}) {
-  const digitsRef = useRef<string>("");
-
-  useEffect(() => {
-    const m = /^(\d{1,2}):(\d{1,2})$/.exec(value ?? "");
-    if (m) {
-      digitsRef.current = String(m[1]).padStart(2, "0") + String(m[2]).padStart(2, "0");
-    }
-  }, [value]);
-
-  const setDigits = (d: string) => {
-    const s = d.replace(/\D/g, "").slice(0, 4);
-    digitsRef.current = s;
-    onChange(digitsToHHMM(s));
-  };
-
-  const keyHandler: React.KeyboardEventHandler<HTMLInputElement> = (e) => {
-    if (/^[0-9]$/.test(e.key)) {
-      e.preventDefault();
-      setDigits(digitsRef.current + e.key);
-      return;
-    }
-    if (e.key === "Backspace") {
-      e.preventDefault();
-      setDigits(digitsRef.current.slice(0, -1));
-      return;
-    }
-    if (e.key === "Delete") {
-      e.preventDefault();
-      setDigits("");
-      return;
-    }
-    if (e.key === "Enter") {
-      e.preventDefault();
-      onEnter?.();
-    }
-  };
-
-  const handlePaste: React.ClipboardEventHandler<HTMLInputElement> = (e) => {
-    const txt = e.clipboardData.getData("text");
-    const d = txt.replace(/\D/g, "").slice(0, 4);
-    if (d) {
-      e.preventDefault();
-      setDigits(d);
-    }
-  };
-
-  return (
-    <input
-      type="text"
-      className={`rounded-lg border px-3 py-1.5 text-center ${className ?? ""}`}
-      value={digitsToHHMM(digitsRef.current)}
-      onKeyDown={keyHandler}
-      onPaste={handlePaste}
-      onChange={() => {}}
-    />
-  );
-}
 
 /* ========= 本体 ========= */
 export default function SectionsEditor(props: Props) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
-  const onDragEndChildren = (groupId: string, items: string[]) => (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    const oldIndex = items.indexOf(String(active.id));
-    const newIndex = items.indexOf(String(over.id));
-    if (oldIndex < 0 || newIndex < 0) return;
-    arrayMove(items, oldIndex, newIndex);
-    // 並べ替えの実データ更新は親側に任せる場合はここでコールバックを用意してください
-  };
+  // 子要素の並び替えを保存
+  const onDragEndChildren = (groupId: string, items: string[], children: SectionGroup["children"]) =>
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      const oldIndex = items.indexOf(String(active.id));
+      const newIndex = items.indexOf(String(over.id));
+      if (oldIndex < 0 || newIndex < 0) return;
+      const newOrderIds = arrayMove(items, oldIndex, newIndex);
+      const byId = new Map(children.map((c) => [c.id, c]));
+      const reordered = newOrderIds.map((id) => byId.get(id)!).filter(Boolean);
+      props.updateGroup(groupId, { children: reordered } as Partial<SectionGroup>);
+    };
+
+  // ===== 子ギャラリー: ファイル選択 → 即時プレビュー → 本アップロード =====
+  const makeChildOnFile = useCallback(
+    (groupId: string, childId: string) =>
+      (imgId: string, e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.currentTarget.files?.[0];
+        if (!file) return;
+        // 即時プレビュー（仮URL）
+        const localUrl = URL.createObjectURL(file);
+        props.setChildImage(groupId, childId, imgId, { url: localUrl });
+        // 本アップロード（完了後、サーバーURLで上書きされる）
+        props.onChildImageFile(groupId, childId, imgId, e);
+      },
+    [props]
+  );
 
   return (
     <section className="mb-12">
@@ -260,7 +158,11 @@ export default function SectionsEditor(props: Props) {
                 <span className="text-xs text-slate-500">左の≡アイコンをドラッグして順序変更。</span>
               </div>
 
-              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEndChildren(g.id, childIds)}>
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={onDragEndChildren(g.id, childIds, g.children)}
+              >
                 <SortableContext items={childIds} strategy={rectSortingStrategy}>
                   <div className="mt-4 space-y-4">
                     {g.children.map((c) => {
@@ -297,12 +199,16 @@ export default function SectionsEditor(props: Props) {
                                 const isLast = idx === c.items.length - 1;
                                 return (
                                   <div key={row.id} className="grid grid-cols-1 items-start gap-2 md:grid-cols-7">
-                                    <TimeInput
-                                      className="md:col-span-1"
-                                      value={row.time ?? "00:00"}
-                                      onChange={(hhmm) => props.setTimelineRow(g.id, c.id, row.id, { time: hhmm })}
-                                      onEnter={() => props.addTimelineRow(g.id, c.id)}
-                                    />
+                                    <div className="grid grid-cols-[120px,1fr] gap-3 items-center">
+                                      <div>
+                                        <label className="text-xs text-slate-500 block mb-1">時刻</label>
+                                        <TimeInput
+                                          value={row.time ?? ""}
+                                          onChange={(v) => props.setTimelineRow(g.id, c.id, row.id, { time: v })}
+                                        />
+                                      </div>
+                                    </div>
+
                                     <input
                                       className="md:col-span-3 rounded-lg border px-2 py-1.5"
                                       placeholder="内容"
@@ -352,112 +258,25 @@ export default function SectionsEditor(props: Props) {
                                 <p className="text-sm text-slate-500">※ 「行を追加」から入力してください。</p>
                               )}
                             </div>
-
-                            <div className="sticky bottom-0 -mx-3 mt-3 bg-gradient-to-t from-white/90 to-transparent px-3 py-2">
-                              <button
-                                onClick={() => props.addTimelineRow(g.id, c.id)}
-                                className="w-full rounded-lg border px-3 py-1.5 text-sm md:w-auto"
-                              >
-                                行を追加
-                              </button>
-                            </div>
                           </SortableChildCard>
                         );
                       }
 
-                      // ==== ギャラリー ====
+                      // ==== ギャラリー（PageGalleryEditor を流用） ====
                       if (c.kind === "gallery") {
                         const currentLayout: GalleryLayout = c.layout ?? "grid";
-                        const name = `layout-${g.id}-${c.id}`;
-
                         return (
                           <SortableChildCard key={c.id} id={c.id} header="ギャラリー" onRemove={() => props.rmChild(g.id, c.id)}>
-                            {/* レイアウト切替 & 追加 */}
-                            <div className="mb-2 flex flex-wrap items-center gap-3">
-                              <div className="text-sm text-slate-700">表示：</div>
-                              <label className="flex items-center gap-1 text-sm">
-                                <input
-                                  type="radio"
-                                  name={name}
-                                  checked={currentLayout === "grid"}
-                                  onChange={() => props.setChildGalleryLayout(g.id, c.id, "grid")}
-                                />
-                                グリッド
-                              </label>
-                              <label className="flex items-center gap-1 text-sm">
-                                <input
-                                  type="radio"
-                                  name={name}
-                                  checked={currentLayout === "slideshow"}
-                                  onChange={() => props.setChildGalleryLayout(g.id, c.id, "slideshow")}
-                                />
-                                スライドショー
-                              </label>
-
-                              <button
-                                onClick={() => props.addChildImage(g.id, c.id)}
-                                className="ml-auto rounded-lg border px-3 py-1.5 text-sm"
-                              >
-                                画像を追加
-                              </button>
-                            </div>
-
-                            {/* プレビュー（スライドショー） */}
-                            {currentLayout === "slideshow" && (
-                              <div className="mb-3">
-                                <MiniSlideshow items={c.images} />
-                              </div>
-                            )}
-
-                            {/* 編集UI（共通） */}
-                            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                              {c.images.map((im) => (
-                                <div key={im.id} className="rounded-xl border border-slate-200 bg-white/90 p-3">
-                                  <div className="space-y-3">
-                                    {im.url ? (
-                                      // eslint-disable-next-line @next/next/no-img-element
-                                      <img src={im.url} alt={im.caption ?? ""} className="h-40 w-full rounded-lg border object-cover" />
-                                    ) : (
-                                      <div className="flex h-40 items-center justify-center rounded-lg border border-dashed text-slate-500">
-                                        画像がありません
-                                      </div>
-                                    )}
-                                    <label className="inline-flex items-center gap-2 text-sm">
-                                      <input
-                                        type="file"
-                                        accept="image/*"
-                                        onChange={(e) => props.onChildImageFile(g.id, c.id, im.id, e)}
-                                        disabled={!!props.uploadingMap[im.id]}
-                                      />
-                                      {props.uploadingMap[im.id] ? "アップロード中…" : "画像ファイルを選択"}
-                                    </label>
-                                    <input
-                                      className="w-full rounded-lg border px-3 py-2"
-                                      placeholder="キャプション（任意）"
-                                      value={im.caption ?? ""}
-                                      onChange={(e) => props.setChildImage(g.id, c.id, im.id, { caption: e.target.value })}
-                                    />
-                                    <div className="text-right">
-                                      <button onClick={() => props.rmChildImage(g.id, c.id, im.id)} className="text-sm text-red-600">削除</button>
-                                    </div>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-
-                            {c.images.length === 0 && (
-                              <p className="mt-2 text-sm text-slate-500">※ 「画像を追加」からファイルを選択してください。</p>
-                            )}
-
-                            {/* 下部にも追加ボタン */}
-                            <div className="mt-3 flex justify-end">
-                              <button
-                                onClick={() => props.addChildImage(g.id, c.id)}
-                                className="rounded-lg border px-3 py-1.5 text-sm"
-                              >
-                                ＋ 画像を追加
-                              </button>
-                            </div>
+                            <PageGalleryEditor
+                              items={c.images}
+                              add={() => props.addChildImage(g.id, c.id)}
+                              update={(imgId, patch) => props.setChildImage(g.id, c.id, imgId, patch)}
+                              remove={(imgId) => props.rmChildImage(g.id, c.id, imgId)}
+                              onFile={makeChildOnFile(g.id, c.id)}  // ★ 即時プレビュー＋アップロード
+                              uploadingMap={props.uploadingMap}
+                              layout={currentLayout}
+                              setLayout={(v) => props.setChildGalleryLayout(g.id, c.id, v)}
+                            />
                           </SortableChildCard>
                         );
                       }

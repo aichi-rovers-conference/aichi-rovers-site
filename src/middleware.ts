@@ -16,10 +16,13 @@ const COOKIE_DOMAIN_DEFAULT = process.env.COOKIE_DOMAIN ?? `.${CANONICAL_HOST}`;
 // 公開扱いにするパス（/exec の一部など）
 const PUBLIC_EXEC_PATHS = ["/exec/meetings/qr/show"];
 
+const isApi = (p: string) => p.startsWith("/api/");
+
 // “公開”判定（認可をかけない）
 const ALWAYS_PUBLIC = (p: string) =>
   p.startsWith("/api/auth/login") ||
   p.startsWith("/api/auth/logout") ||
+  p.startsWith("/api/uploads") || // ← 追加：アップロードAPIは認可バイパス（必要に応じて外してOK）
   p.startsWith("/p/") ||
   PUBLIC_EXEC_PATHS.some((s) => p.startsWith(s)) ||
   p === "/login" ||
@@ -38,28 +41,32 @@ function validateNext(n?: string | null) {
 
 export async function middleware(req: NextRequest) {
   // 0) /api/auth/login|logout は完全素通し
-  if (shouldBypassAll(req)) {
-    return NextResponse.next();
-  }
+  if (shouldBypassAll(req)) return NextResponse.next();
+
+  const url = req.nextUrl;
+  const { pathname, search } = url;
 
   // 1) HTTPS/ホスト正規化（本番のみ）
   if (isProd) {
     const proto = (req.headers.get("x-forwarded-proto") || "").toLowerCase();
     const host = (req.headers.get("host") || "").toLowerCase();
+    const isPreviewHost = host.endsWith(".vercel.app") || host.endsWith(".vercel.sh");
+
+    // HTTPS 強制（API/ページ共通）
     if (proto && proto !== "https") {
-      const url = new URL(req.url);
-      url.protocol = "https:";
-      return NextResponse.redirect(url, 308);
+      const u = new URL(req.url);
+      u.protocol = "https:";
+      return NextResponse.redirect(u, 308);
     }
-    if (host && !ALLOWED_HOSTS.has(host)) {
-      const url = new URL(req.url);
-      url.host = CANONICAL_HOST;
-      return NextResponse.redirect(url, 308);
+
+    // API はホスト正規化しない（fetch の 308→クロスオリジン問題を避ける）
+    // ページだけ正規化（ただしプレビューは許可）
+    if (!isApi(pathname) && !isPreviewHost && host && !ALLOWED_HOSTS.has(host)) {
+      const u = new URL(req.url);
+      u.host = CANONICAL_HOST;
+      return NextResponse.redirect(u, 308);
     }
   }
-
-  const url = req.nextUrl;
-  const { pathname, search } = url;
 
   // 2) 既ログインなら /login と / から /exec に誘導
   if (pathname === "/login") {
@@ -175,6 +182,7 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
+  // API も通すが、静的ファイルは除外
   matcher: [
     "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|images|public|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|css|js|map)).*)",
   ],
