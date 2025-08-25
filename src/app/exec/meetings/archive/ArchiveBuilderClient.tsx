@@ -54,25 +54,28 @@ export default function ArchiveBuilderClient() {
     topMediaType, setTopMediaType, onYouTubeChange,
     status,
     loading, loadingExisting,
-    uploadingCover, uploadingMap,
+    uploadingCover, uploadingMap, // ← hook 側のアップロードフラグ（併用可）
     addPagePhoto, updatePagePhoto, rmPagePhoto,
     addGroup, updateGroup, rmGroup,
     addChildToGroup, rmChild, setChildText,
     addTimelineRow, setTimelineRow, rmTimelineRow,
-    addChildImage, setChildImage, rmChildImage, onChildImageFile,
+    addChildImage, setChildImage, rmChildImage,
+    // onChildImageFile ← 使わず、下で安全なハンドラに差し替える
     setChildGalleryLayout,
     save, previewUrl, saveModal, setSaveModal, copyLink, copied,
   } = useReportForm();
 
-  // ← 表示用のリンクは r{令和}-{回} 規約で強制生成（reportUrl があればそちらを優先）
+  // 表示用のリンク
   const computedPreviewUrl = buildPreviewUrl(
     form.fiscalYear as number | undefined,
     form.round as number | undefined,
     form.reportUrl
   );
 
+  // ===== 追加：このファイル内でアップロード管理（カバー / ページギャラリー / 本文ギャラリー） =====
   const [localCoverUploading, setLocalCoverUploading] = useState(false);
-  const [localUploadingMap, setLocalUploadingMap] = useState<Record<string, boolean>>({});
+  const [localPageUploading, setLocalPageUploading] = useState<Record<string, boolean>>({});
+  const [localChildUploading, setLocalChildUploading] = useState<Record<string, boolean>>({});
 
   const uploadToServer = async (file: File) => {
     const fd = new FormData();
@@ -85,6 +88,7 @@ export default function ArchiveBuilderClient() {
     return json as { url: string; name?: string; size?: number; contentType?: string };
   };
 
+  // カバー画像（常に https を保存）
   const handleCoverInput: React.ChangeEventHandler<HTMLInputElement> = async (e) => {
     const input = e.currentTarget;
     const f = input.files?.[0];
@@ -98,19 +102,18 @@ export default function ArchiveBuilderClient() {
       console.error(err);
       alert(err?.message ?? "カバー画像のアップロードに失敗しました");
     } finally {
-      setTimeout(() => {
-        if (input) input.value = "";
-      }, 0);
+      setTimeout(() => { input.value = ""; }, 0);
       setLocalCoverUploading(false);
     }
   };
 
+  // ページギャラリー（caption キーで保存）
   const handleGalleryFile = async (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const input = e.currentTarget;
     const f = input.files?.[0];
     if (!f) return;
 
-    setLocalUploadingMap((m) => ({ ...m, [id]: true }));
+    setLocalPageUploading((m) => ({ ...m, [id]: true }));
     try {
       const { url } = await uploadToServer(f);
 
@@ -118,21 +121,46 @@ export default function ArchiveBuilderClient() {
       const idx = curr.findIndex((it: any) => it?.id === id);
       if (idx >= 0) {
         const before = curr[idx] as any;
-        curr[idx] = { ...before, url, alt: (f as any)?.name ?? "" };
+        curr[idx] = { ...before, url, caption: (f as any)?.name ?? "" }; // ← caption で保存
       } else {
-        curr.push({ id, url, alt: (f as any)?.name ?? "" } as any);
+        curr.push({ id, url, caption: (f as any)?.name ?? "" } as any);
       }
       change("pageGallery", curr as any);
     } catch (err: any) {
       console.error(err);
       alert(err?.message ?? "画像のアップロードに失敗しました");
     } finally {
-      setLocalUploadingMap((m) => {
+      setLocalPageUploading((m) => {
         const n = { ...m }; delete n[id]; return n;
       });
-      setTimeout(() => {
-        if (input) input.value = "";
-      }, 0);
+      setTimeout(() => { input.value = ""; }, 0);
+    }
+  };
+
+  // ★ 追加：本文ギャラリー（SectionsEditor 用）— 常に https を保存
+  const handleChildImageFile = async (
+    groupId: string,
+    childId: string,
+    imgId: string,
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const input = e.currentTarget;
+    const f = input.files?.[0];
+    if (!f) return;
+
+    setLocalChildUploading((m) => ({ ...m, [imgId]: true }));
+    try {
+      const { url } = await uploadToServer(f);
+      // hook の setChildImage に「保存用URLだけ」を渡す
+      setChildImage(groupId, childId, imgId, { url, caption: f.name });
+    } catch (err: any) {
+      console.error(err);
+      alert(err?.message ?? "画像のアップロードに失敗しました");
+    } finally {
+      setLocalChildUploading((m) => {
+        const n = { ...m }; delete n[imgId]; return n;
+      });
+      setTimeout(() => { input.value = ""; }, 0);
     }
   };
 
@@ -140,12 +168,15 @@ export default function ArchiveBuilderClient() {
   const handleSetPageGalleryLayout = (v: GalleryLayout) => change("pageGalleryLayout", v);
 
   const isUploading = useMemo(() => {
-    const localAny = localCoverUploading || Object.values(localUploadingMap).some(Boolean);
+    const localAny =
+      localCoverUploading ||
+      Object.values(localPageUploading).some(Boolean) ||
+      Object.values(localChildUploading).some(Boolean);
     const hookAny =
       Boolean(uploadingCover) ||
       Boolean(uploadingMap && Object.values(uploadingMap as Record<string, boolean>).some(Boolean));
     return localAny || hookAny;
-  }, [localCoverUploading, localUploadingMap, uploadingCover, uploadingMap]);
+  }, [localCoverUploading, localPageUploading, localChildUploading, uploadingCover, uploadingMap]);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-white to-slate-50 max-w-[100vw] overflow-x-clip">
@@ -293,7 +324,7 @@ export default function ArchiveBuilderClient() {
             update={updatePagePhoto}
             remove={rmPagePhoto}
             onFile={handleGalleryFile}
-            uploadingMap={{ ...(uploadingMap || {}), ...localUploadingMap }}
+            uploadingMap={{ ...(uploadingMap || {}), ...localPageUploading }}
             layout={galleryLayout}
             setLayout={handleSetPageGalleryLayout}
           />
@@ -315,8 +346,10 @@ export default function ArchiveBuilderClient() {
             addChildImage={addChildImage}
             setChildImage={setChildImage}
             rmChildImage={rmChildImage}
-            onChildImageFile={onChildImageFile}
-            uploadingMap={uploadingMap}
+            // ▼ 差し替え：常に /api/uploads 経由で https URL を保存
+            onChildImageFile={handleChildImageFile}
+            // アップロード中表示（hook + ローカルを合成）
+            uploadingMap={{ ...(uploadingMap || {}), ...localChildUploading }}
             setChildGalleryLayout={setChildGalleryLayout}
           />
         </SectionCard>
