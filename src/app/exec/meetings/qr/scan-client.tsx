@@ -2,9 +2,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { createPortal } from "react-dom";
-import { CheckCircle2, Camera, CameraOff, List, History } from "lucide-react";
+import { CheckCircle2, Camera, CameraOff, History, Sun } from "lucide-react";
 
 type ScanResult = {
   ok: boolean;
@@ -14,16 +13,18 @@ type ScanResult = {
   attendance?: { checkedAt?: string; already: boolean };
 };
 
-const LIST_URL = "/exec/meetings/sheet"; // ← 環境に合わせて変更
+const LIST_URL = "/exec/meetings/sheet"; // ← 必要なら使用
 
 export default function QRScanClient() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [mounted, setMounted] = useState(false);       // Portal準備
-  const [running, setRunning] = useState(false);       // 開始で全画面に
+  const [mounted, setMounted] = useState(false);        // Portal準備
+  const [running, setRunning] = useState(false);        // 開始で全画面に
   const [last, setLast] = useState<ScanResult | null>(null);
   const [history, setHistory] = useState<ScanResult[]>([]);
-  const [histOpen, setHistOpen] = useState(false);     // 履歴ドロワー
-  const [showConfirm, setShowConfirm] = useState(false); // 前面トースト
+  const [histOpen, setHistOpen] = useState(false);      // 履歴ドロワー
+  const [showConfirm, setShowConfirm] = useState(false);// 前面トースト
+  const [torchOn, setTorchOn] = useState(false);        // トーチON/OFF
+  const mediaTrackRef = useRef<MediaStreamTrack | null>(null);
   const lastTextRef = useRef<string>("");
 
   useEffect(() => setMounted(true), []);
@@ -45,78 +46,125 @@ export default function QRScanClient() {
     };
   }, [running]);
 
+  // トーチ切替（対応端末のみ作動）
+  async function toggleTorch() {
+    const track = mediaTrackRef.current;
+    if (!track) return;
+    const caps: any = (track as any).getCapabilities?.();
+    if (!caps || !caps.torch) return; // 非対応
+    try {
+      await track.applyConstraints({ advanced: [{ torch: !torchOn }] as any });
+      setTorchOn((v) => !v);
+    } catch {
+      /* noop */
+    }
+  }
+
   useEffect(() => {
     let controls: import("@zxing/browser").IScannerControls | null = null;
 
     async function start() {
       if (!videoRef.current) return;
-      const { BrowserMultiFormatReader } = await import("@zxing/browser");
-      const reader = new BrowserMultiFormatReader();
 
-      controls = await reader.decodeFromVideoDevice(
-        undefined,
-        videoRef.current,
-        async (result) => {
-          if (!result) return;
+      // ライブラリを動的読込（初期ロード軽量化）
+      const [{ BrowserMultiFormatReader }, lib] = await Promise.all([
+        import("@zxing/browser"),
+        import("@zxing/library"),
+      ]);
+      const { BarcodeFormat, DecodeHintType } = lib;
+
+      // ---- 高速化ヒント：QR限定 & TRY_HARDER無効 ----
+      const hints = new Map();
+      hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.QR_CODE]);
+      hints.set(DecodeHintType.TRY_HARDER, false);
+
+      const reader = new BrowserMultiFormatReader(hints as any);
+
+      // ---- カメラ制約：背面・720p・30fps・連続AF（端末により無視され得る）----
+      const constraints: MediaStreamConstraints = {
+        audio: false,
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280, max: 1280 },
+          height: { ideal: 720, max: 720 },
+          frameRate: { ideal: 30, max: 30 },
+          advanced: [{ focusMode: "continuous" } as any ],
+        },
+      };
+
+      // decodeFromConstraints は内部で最適化された getUserMedia を扱う
+      controls = await reader.decodeFromConstraints(constraints, videoRef.current!, async (result) => {
+        if (!result) return;
+        try {
+          const text = result.getText();
+          // 同一QRの連続発火防止（短い間隔での再読込は無視）
+          if (text === lastTextRef.current) return;
+          lastTextRef.current = text;
+
+          let payload: any;
           try {
-            const text = result.getText();
-            if (text === lastTextRef.current) return;
-            lastTextRef.current = text;
-
-            let payload: any;
-            try {
-              payload = JSON.parse(text);
-            } catch {
-              setLast({ ok: false, message: "QRの内容が不正です（JSONではありません）" });
-              setShowConfirm(true);
-              return;
-            }
-            if (!payload || payload.type !== "arc-attendance" || !payload.meeting || !payload.participantId) {
-              setLast({ ok: false, message: "不正なQRです（必須フィールド不足）" });
-              setShowConfirm(true);
-              return;
-            }
-
-            const r = await fetch("/api/attendance/checkin", {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify(payload),
-            });
-
-            const j = await r.json().catch(() => ({}));
-            let normalized: ScanResult;
-            if (r.ok && j?.ok) {
-              const meetingCode: string = j?.meeting?.code ?? j?.meeting ?? payload.meeting ?? "";
-              const already: boolean = j?.attendance?.already ?? j?.already ?? false;
-              const checkedAt: string | undefined = j?.attendance?.checkedAt ?? j?.checkedAt ?? undefined;
-              const participant = {
-                id: j?.participant?.id ?? j?.participantId ?? payload.participantId,
-                name: j?.participant?.name ?? j?.name ?? "",
-                troop: j?.participant?.troop,
-                district: j?.participant?.district,
-              };
-              normalized = {
-                ok: true,
-                meeting: { code: meetingCode },
-                participant,
-                attendance: { already, checkedAt },
-              };
-            } else {
-              normalized = { ok: false, message: j?.error || r.statusText || "保存に失敗しました" };
-            }
-
-            setLast(normalized);
-            setHistory((h) => [normalized, ...h].slice(0, 20));
-            setShowConfirm(true);
+            payload = JSON.parse(text);
           } catch {
-            setLast({ ok: false, message: "読み取り処理に失敗しました" });
+            setLast({ ok: false, message: "QRの内容が不正です（JSONではありません）" });
             setShowConfirm(true);
-          } finally {
-            setTimeout(() => { lastTextRef.current = ""; }, 600);
-            setTimeout(() => setShowConfirm(false), 2200);
+            return;
           }
+          if (!payload || payload.type !== "arc-attendance" || !payload.meeting || !payload.participantId) {
+            setLast({ ok: false, message: "不正なQRです（必須フィールド不足）" });
+            setShowConfirm(true);
+            return;
+          }
+
+          const r = await fetch("/api/attendance/checkin", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+
+          const j = await r.json().catch(() => ({}));
+          let normalized: ScanResult;
+          if (r.ok && j?.ok) {
+            const meetingCode: string = j?.meeting?.code ?? j?.meeting ?? payload.meeting ?? "";
+            const already: boolean = j?.attendance?.already ?? j?.already ?? false;
+            const checkedAt: string | undefined = j?.attendance?.checkedAt ?? j?.checkedAt ?? undefined;
+            const participant = {
+              id: j?.participant?.id ?? j?.participantId ?? payload.participantId,
+              name: j?.participant?.name ?? j?.name ?? "",
+              troop: j?.participant?.troop,
+              district: j?.participant?.district,
+            };
+            normalized = {
+              ok: true,
+              meeting: { code: meetingCode },
+              participant,
+              attendance: { already, checkedAt },
+            };
+          } else {
+            normalized = { ok: false, message: j?.error || r.statusText || "保存に失敗しました" };
+          }
+
+          setLast(normalized);
+          setHistory((h) => [normalized, ...h].slice(0, 20));
+          setShowConfirm(true);
+        } catch {
+          setLast({ ok: false, message: "読み取り処理に失敗しました" });
+          setShowConfirm(true);
+        } finally {
+          // 次の読み取りに備えて連続発火を短時間で解除
+          setTimeout(() => {
+            lastTextRef.current = "";
+          }, 600);
+          setTimeout(() => setShowConfirm(false), 2200);
         }
-      );
+      });
+
+      // 実際に使われている MediaStreamTrack を保持（トーチ制御用）
+      try {
+        const stream = (videoRef.current!.srcObject as MediaStream) ?? null;
+        mediaTrackRef.current = stream?.getVideoTracks?.()[0] ?? null;
+      } catch {
+        mediaTrackRef.current = null;
+      }
     }
 
     if (running) {
@@ -127,18 +175,22 @@ export default function QRScanClient() {
     }
 
     return () => {
+      // クリーンアップ：スキャン停止＋カメラ停止（省電力/権限解放）
       if (controls) {
-        try { controls.stop(); } catch {}
+        try {
+          controls.stop();
+        } catch {}
       }
+      try {
+        const track = mediaTrackRef.current;
+        mediaTrackRef.current = null;
+        if (track) track.stop();
+      } catch {}
+      // 消灯状態に戻す
+      setTorchOn(false);
     };
   }, [running]);
 
-  const confirmText =
-    last?.ok
-      ? `${last.participant?.name || "（氏名不明）"} さん\n${last.meeting?.code ?? "—"} の出席を記録しました${last.attendance?.already ? "（既出席）" : ""}`
-      : (last?.message ?? "");
-
-  // ===== 開始前：通常カードUI =====
   const PreView = (
     <div className="rounded-2xl bg-white ring-1 ring-slate-200 shadow-sm p-4 md:p-5">
       <div className="flex flex-wrap items-center gap-2">
@@ -149,13 +201,6 @@ export default function QRScanClient() {
           <Camera className="h-4 w-4" />
           カメラ開始
         </button>
-        <Link
-          href={LIST_URL}
-          className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm bg-slate-900 text-white"
-        >
-          <List className="h-4 w-4" />
-          QRリストへ
-        </Link>
         <button
           onClick={() => setHistOpen(true)}
           className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold shadow-sm bg-white text-slate-900 ring-1 ring-slate-200"
@@ -232,13 +277,17 @@ export default function QRScanClient() {
             停止
           </button>
 
-          <Link
-            href={LIST_URL}
-            className="min-w-0 flex-1 shrink-0 basis-0 inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold shadow-sm bg-white/90 text-slate-900 backdrop-blur whitespace-nowrap"
+          {/* トーチ（対応端末のみ有効／未対応でも押下安全） */}
+          <button
+            onClick={toggleTorch}
+            className={`shrink-0 inline-flex items-center justify-center rounded-lg px-3 py-2 text-sm font-semibold shadow-sm ${
+              torchOn ? "bg-amber-500 text-white" : "bg-white/90 text-slate-900 backdrop-blur"
+            }`}
+            title="トーチ（対応端末のみ）"
           >
-            <List className="h-4 w-4" />
-            QRリスト
-          </Link>
+            <Sun className="h-4 w-4" />
+            {torchOn ? "点灯中" : "トーチ"}
+          </button>
 
           <button
             onClick={() => setHistOpen(true)}
