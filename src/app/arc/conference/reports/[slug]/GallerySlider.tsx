@@ -39,7 +39,7 @@ export default function GallerySlider({
   // autoplay
   useEffect(() => {
     if (slides.length <= 1) return;
-    timerRef.current && window.clearInterval(timerRef.current);
+    if (timerRef.current) window.clearInterval(timerRef.current);
     timerRef.current = window.setInterval(() => {
       setIdx((p) => (p + 1) % slides.length);
     }, intervalMs);
@@ -62,85 +62,116 @@ export default function GallerySlider({
 
   if (slides.length === 0) return null;
 
-  // デスクトップ：isHovering のときのみ表示 / タッチ：常時表示
+  // デスクトップ：isHovering のときのみ表示 / タッチ：常時表示（仕様は現状維持）
   const showArrows = isTouchLike || isHovering;
   const arrowVisibility = showArrows ? "opacity-100" : "opacity-0 pointer-events-none";
 
   return (
     <div
-      className="relative w-full rounded-xl border overflow-hidden bg-white"
+      className="relative"
       onMouseEnter={() => setIsHovering(true)}
       onMouseLeave={() => setIsHovering(false)}
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
     >
-      {/* スライド領域 */}
-      <div className="relative w-full overflow-hidden">
-        <div
-          className="flex transition-transform duration-500 ease-out"
-          style={{ transform: `translateX(-${idx * 100}%)` }}
-        >
-          {slides.map((s) => (
-            <figure key={s.id} className="shrink-0 w-full relative">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={s.url}
-                alt={s.caption ?? ""}
-                className="w-full h-[48vw] max-h-[520px] object-cover select-none"
-                draggable={false}
-              />
-              {s.caption && (
-                <figcaption className="absolute bottom-0 left-0 right-0 bg-black/45 text-white text-sm px-3 py-2">
-                  {s.caption}
-                </figcaption>
-              )}
-            </figure>
-          ))}
+      {/* 外枠：薄い枠＋柔らかい影 */}
+      <div className="rounded-2xl border border-neutral-200/70 bg-white shadow-lg overflow-hidden">
+        {/* スライド領域 */}
+        <div className="relative w-full overflow-hidden">
+          <div
+            className="flex transition-transform duration-500 ease-out"
+            style={{ transform: `translateX(-${idx * 100}%)` }}
+          >
+            {slides.map((s) => (
+              <figure key={s.id} className="shrink-0 w-full relative">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={s.url}
+                  alt={s.caption ?? ""}
+                  loading="lazy"
+                  decoding="async"
+                  className="w-full h-[48vw] max-h-[520px] object-cover select-none bg-neutral-100"
+                  draggable={false}
+                />
+                {/* 下部キャプション：最小限の読みやすさ確保 */}
+                {s.caption && (
+                  <figcaption
+                    className="
+                      absolute inset-x-0 bottom-0 px-3 py-2
+                      text-sm text-white
+                      bg-gradient-to-t from-black/65 via-black/25 to-transparent
+                      backdrop-blur-[1px]
+                    "
+                  >
+                    {s.caption}
+                  </figcaption>
+                )}
+              </figure>
+            ))}
+          </div>
+
+          {/* 左右ナビ（丸ボタン・中央に＜ ＞） */}
+          {slides.length > 1 && (
+            <>
+              <button
+                onClick={prev}
+                aria-label="前へ"
+                className={`
+                  ${arrowVisibility}
+                  absolute left-3 md:left-4 top-1/2 -translate-y-1/2
+                  h-11 w-11 md:h-12 md:w-12
+                  rounded-full
+                  bg-white/90 text-neutral-900
+                  shadow-md ring-1 ring-black/10 backdrop-blur
+                  flex items-center justify-center
+                  transition duration-200
+                  hover:bg-white active:scale-95
+                `}
+              >
+                <span className="text-2xl md:text-3xl leading-none">＜</span>
+              </button>
+
+              <button
+                onClick={next}
+                aria-label="次へ"
+                className={`
+                  ${arrowVisibility}
+                  absolute right-3 md:right-4 top-1/2 -translate-y-1/2
+                  h-11 w-11 md:h-12 md:w-12
+                  rounded-full
+                  bg-white/90 text-neutral-900
+                  shadow-md ring-1 ring-black/10 backdrop-blur
+                  flex items-center justify-center
+                  transition duration-200
+                  hover:bg-white active:scale-95
+                `}
+              >
+                <span className="text-2xl md:text-3xl leading-none">＞</span>
+              </button>
+            </>
+          )}
+
+          {/* ドットナビ：ニュートラル */}
+          {slides.length > 1 && (
+            <div className="absolute bottom-3 md:bottom-4 left-0 right-0 flex items-center justify-center gap-2">
+              {slides.map((_, i) => (
+                <button
+                  key={i}
+                  aria-label={`スライド ${i + 1}`}
+                  onClick={() => go(i)}
+                  className={`
+                    h-2.5 w-2.5 rounded-full transition
+                    ${i === idx
+                      ? "bg-neutral-900"
+                      : "bg-white/90 ring-1 ring-neutral-300 hover:bg-white"}
+                    shadow-sm
+                  `}
+                />
+              ))}
+            </div>
+          )}
         </div>
       </div>
-
-      {/* 左右ナビ（デスクトップは hover 時のみ表示） */}
-      {slides.length > 1 && (
-        <>
-          <button
-            onClick={prev}
-            aria-label="前へ"
-            className={`absolute left-3 md:left-4 top-1/2 -translate-y-1/2 
-                        transition-opacity duration-200 ${arrowVisibility}
-                        rounded-full bg-black/55 text-white 
-                        p-3 md:p-4 text-3xl md:text-4xl shadow
-                        hover:bg-black/70 active:scale-95`}
-          >
-            ‹
-          </button>
-          <button
-            onClick={next}
-            aria-label="次へ"
-            className={`absolute right-3 md:right-4 top-1/2 -translate-y-1/2 
-                        transition-opacity duration-200 ${arrowVisibility}
-                        rounded-full bg-black/55 text-white 
-                        p-3 md:p-4 text-3xl md:text-4xl shadow
-                        hover:bg-black/70 active:scale-95`}
-          >
-            ›
-          </button>
-        </>
-      )}
-
-      {/* ドットナビ */}
-      {slides.length > 1 && (
-        <div className="absolute bottom-2 left-0 right-0 flex items-center justify-center gap-2">
-          {slides.map((_, i) => (
-            <button
-              key={i}
-              aria-label={`スライド ${i + 1}`}
-              className={`h-2.5 w-2.5 rounded-full transition
-                         ${i === idx ? "bg-red-600 scale-110" : "bg-white/80 hover:bg-white"}`}
-              onClick={() => go(i)}
-            />
-          ))}
-        </div>
-      )}
     </div>
   );
 }

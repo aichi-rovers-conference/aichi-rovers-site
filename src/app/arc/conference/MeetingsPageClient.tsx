@@ -37,7 +37,57 @@ function fmtDate(d: string) {
   return `${y}-${m}-${day}`;
 }
 
-/* ✅ バッジを任意の位置に置けるように */
+/* ===== スケルトン（読み込み中UI） ===== */
+function LatestSkeleton() {
+  return (
+    <div
+      className="relative rounded-2xl border border-gray-200 bg-white shadow-sm p-4 sm:p-5 overflow-hidden"
+      role="status"
+      aria-busy="true"
+      aria-live="polite"
+    >
+      <div className="flex items-center justify-between mb-2">
+        <div className="h-5 w-36 rounded bg-gray-200 animate-pulse" />
+        <div className="h-[3px] w-10 bg-gray-200 rounded-full animate-pulse" />
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-[1.4fr,1fr] gap-5 sm:gap-6 items-start">
+        <div className="aspect-video w-full rounded-xl bg-gray-200 animate-pulse" />
+        <div className="space-y-3">
+          <div className="h-4 w-24 rounded bg-gray-200 animate-pulse" />
+          <div className="h-5 w-64 rounded bg-gray-200 animate-pulse" />
+          <div className="h-4 w-28 rounded bg-gray-200 animate-pulse" />
+          <div className="h-9 w-40 rounded-lg bg-gray-200 animate-pulse" />
+        </div>
+      </div>
+      <span className="sr-only">読み込み中…</span>
+    </div>
+  );
+}
+function CardSkeleton() {
+  return (
+    <div className="block rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden" role="status" aria-busy="true">
+      <div className="aspect-[16/9] w-full bg-gray-200 animate-pulse" />
+      <div className="p-4 space-y-3">
+        <div className="h-3 w-28 bg-gray-200 rounded animate-pulse" />
+        <div className="h-4 w-3/4 bg-gray-200 rounded animate-pulse" />
+        <div className="h-3 w-24 bg-gray-200 rounded animate-pulse" />
+        <div className="h-4 w-32 bg-gray-200 rounded animate-pulse" />
+      </div>
+      <span className="sr-only">読み込み中…</span>
+    </div>
+  );
+}
+function GridSkeleton({ count = 4 }: { count?: number }) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+      {Array.from({ length: count }).map((_, i) => (
+        <CardSkeleton key={i} />
+      ))}
+    </div>
+  );
+}
+
+/* ✅ バッジ（NEW） */
 function NewBadge({ className = "" }: { className?: string }) {
   return (
     <div className={`absolute z-30 pointer-events-none ${className}`}>
@@ -53,8 +103,6 @@ function LatestHighlight({ item }: { item: MeetingReport }) {
   const isExternal = /^https?:\/\//i.test(link);
   return (
     <div className="relative rounded-2xl border border-gray-200 bg-white shadow-sm p-4 sm:p-5 overflow-hidden overflow-x-clip">
-      {/* ❌ ここにあった <NewBadge /> は削除 */}
-
       <div className="flex items-center justify-between mb-2">
         <h3 className="font-bold text-gray-900 leading-tight" style={{ fontSize: "clamp(18px,3.8vw,24px)" }}>
           最新のレポート
@@ -65,9 +113,7 @@ function LatestHighlight({ item }: { item: MeetingReport }) {
       <div className="grid grid-cols-1 md:grid-cols-[1.4fr,1fr] gap-5 sm:gap-6 items-start">
         {/* 左：動画 or サムネイル */}
         <div className="relative w-full">
-          {/* ✅ バッジをメディア領域の左上へ移動 */}
           <NewBadge className="left-3 top-3 sm:left-4 sm:top-4" />
-
           {item.youtubeId ? (
             <div className="aspect-video w-full rounded-xl overflow-hidden border bg-black/5">
               <iframe
@@ -193,20 +239,28 @@ export default function MeetingsPage() {
   ];
 
   const [items, setItems] = useState<MeetingReport[] | null>(null);
+  const isLoading = items === null;
 
   useEffect(() => {
-    // 公開済みのみ返すエンドポイントを想定
-    fetch("/api/meeting-reports/public", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data: MeetingReport[]) => {
-        if (!Array.isArray(data)) return setItems([]);
-        // 「開催日」降順
-        const cooked = data
-          .filter((r) => r.isPublished)
-          .sort((a, b) => (a.date < b.date ? 1 : -1));
-        setItems(cooked);
-      })
-      .catch(() => setItems([]));
+    (async () => {
+      try {
+        // キャッシュ潰しクエリを付与（CDN/ブラウザ対策）
+        const r = await fetch(`/api/meeting-reports/public?t=${Date.now()}`, { cache: "no-store" });
+        if (!r.ok) {
+          setItems([]);
+          return;
+        }
+        const json = await r.json();
+        // 配列 or { ok, data } の両対応
+        const arr: any[] = Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
+        const cooked = arr
+          .filter((x) => x?.isPublished)
+          .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        setItems(cooked as MeetingReport[]);
+      } catch {
+        setItems([]);
+      }
+    })();
   }, []);
 
   const latest = items?.[0] ?? null;
@@ -218,7 +272,7 @@ export default function MeetingsPage() {
       if (!map.has(m.fiscalYear)) map.set(m.fiscalYear, []);
       map.get(m.fiscalYear)!.push(m);
     });
-    for (const [fy, arr] of map) {
+    for (const [, arr] of map) {
       arr.sort((a, b) => a.round - b.round);
     }
     return Array.from(map.entries()).sort((a, b) => b[0] - a[0]);
@@ -263,14 +317,14 @@ export default function MeetingsPage() {
       {/* 本文 */}
       <section className="w-full bg-white py-10 sm:py-12 md:py-14 px-4 sm:px-6 md:px-10 lg:px-16 max-w-[100vw] overflow-x-clip">
         <div className="mx-auto max-w-6xl space-y-8">
-          {latest ? (
-            <LatestHighlight item={latest} />
-          ) : (
+          {/* 最新 */}
+          {isLoading ? <LatestSkeleton /> : latest ? <LatestHighlight item={latest} /> : (
             <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-6 text-gray-500 text-sm">
               まだレポートがありません。公開までお待ちください。
             </div>
           )}
 
+          {/* 年度別アーカイブ */}
           <div>
             <h2 className="text-gray-800 font-extrabold tracking-tight leading-tight" style={{ fontSize: "clamp(20px,4.4vw,30px)" }}>
               年度別アーカイブ
@@ -279,22 +333,30 @@ export default function MeetingsPage() {
           </div>
 
           <div className="space-y-10">
-            {grouped.map(([fy, arr]) => (
-              <div key={fy} className="space-y-4">
-                <h3 className="font-bold text-gray-900" style={{ fontSize: "clamp(18px,3.8vw,24px)" }}>
-                  {toWarekiFiscalLabel(fy)}
-                </h3>
-                <div className="text-gray-600 -mt-1" style={{ fontSize: "clamp(12px,3vw,14px)" }}>
-                  第１回 / 第２回 / 第３回（毎年三回目は定例会・交流会になります） / 第４回
-                </div>
+            {isLoading ? (
+              <>
+                {/* ローディング中はダミーのグリッド */}
+                <GridSkeleton count={4} />
+                <GridSkeleton count={4} />
+              </>
+            ) : (
+              grouped.map(([fy, arr]) => (
+                <div key={fy} className="space-y-4">
+                  <h3 className="font-bold text-gray-900" style={{ fontSize: "clamp(18px,3.8vw,24px)" }}>
+                    {toWarekiFiscalLabel(fy)}
+                  </h3>
+                  <div className="text-gray-600 -mt-1" style={{ fontSize: "clamp(12px,3vw,14px)" }}>
+                    第１回 / 第２回 / 第３回（毎年三回目は定例会・交流会になります） / 第４回
+                  </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
-                  {arr.map((m) => (
-                    <MeetingCard key={m.id} m={m} />
-                  ))}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+                    {arr.map((m) => (
+                      <MeetingCard key={m.id} m={m} />
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
       </section>
