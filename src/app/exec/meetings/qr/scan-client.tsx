@@ -16,8 +16,8 @@ type ScanResult = {
 const LIST_URL = "/exec/meetings/sheet"; // ← 必要なら使用
 
 // エスカレーションの閾値（秒）
-const SEC_TO_TRY_HARDER = 2.5;   // これ以上成功が無ければ TRY_HARDER 有効
-const SEC_TO_FULLHD    = 5.0;    // さらに成功が無ければ 1080p に切替
+const SEC_TO_TRY_HARDER = 2.5; // 成功がなければ TRY_HARDER 有効
+const SEC_TO_FULLHD = 5.0;     // さらに成功がなければ 1080p に切替
 
 type ScanMode = "fast-720p" | "hard-720p" | "hard-1080p";
 
@@ -31,9 +31,8 @@ export default function QRScanClient() {
   const [showConfirm, setShowConfirm] = useState(false);// 前面トースト
   const [torchOn, setTorchOn] = useState(false);        // トーチON/OFF
 
-  // 状態表示（任意）
+  // ステータス表示（モードのみ）
   const [mode, setMode] = useState<ScanMode>("fast-720p");
-  const [zoomInfo, setZoomInfo] = useState<string>("—");
 
   const controlsRef = useRef<import("@zxing/browser").IScannerControls | null>(null);
   const mediaTrackRef = useRef<MediaStreamTrack | null>(null);
@@ -71,40 +70,6 @@ export default function QRScanClient() {
     } catch {/* noop */}
   }
 
-  // ズームを中程度に（対応端末のみ）。戻り値は設定後の倍率の文字列。
-  async function applyAutoZoom(track: MediaStreamTrack | null): Promise<string> {
-  // ★ ここでナロイング（以降 track は non-null）
-  if (!track) return "—";
-
-  // 一部ブラウザは型定義が弱いので any 経由で扱う
-  const t: any = track;
-
-  const caps = t.getCapabilities?.();
-  const settings = t.getSettings?.() ?? {};
-
-  // ズーム capability がなければ現状の設定を返すだけ
-  if (!caps || !caps.zoom) {
-    return String(settings.zoom ?? "—");
-  }
-
-  // min/max の存在を安全に確認
-  const min: number = typeof caps.zoom.min === "number" ? caps.zoom.min : 1;
-  const max: number =
-    typeof caps.zoom.max === "number"
-      ? caps.zoom.max
-      : (typeof settings.zoom === "number" ? settings.zoom : 1);
-
-  if (!(max > min)) return String(settings.zoom ?? "—");
-
-  // 半分くらいまでズーム（強すぎるとピントが合いづらい）
-  const target = Math.min(max, min + (max - min) * 0.5);
-
-  // Chrome/Android などで有効（型は any で吸収）
-  await t.applyConstraints?.({ advanced: [{ zoom: target }] });
-
-  return target.toFixed(2);
-}
-
   // ZXing スキャナ開始（モード別にヒントと解像度を切替）
   async function startScanner(nextMode: ScanMode) {
     // 既存を停止
@@ -138,15 +103,15 @@ export default function QRScanClient() {
     // ---- カメラ制約 ----
     const base720 = { width: { ideal: 1280, max: 1280 }, height: { ideal: 720, max: 720 } };
     const base1080 = { width: { ideal: 1920, max: 1920 }, height: { ideal: 1080, max: 1080 } };
-
     const use1080 = nextMode === "hard-1080p";
+
     const constraints: MediaStreamConstraints = {
       audio: false,
       video: {
         facingMode: { ideal: "environment" },
         ...(use1080 ? base1080 : base720),
         frameRate: { ideal: 30, max: 30 },
-        advanced: [{ focusMode: "continuous" } as any],
+        advanced: [{ focusMode: "continuous" } as any], // 型差吸収
       },
     };
 
@@ -209,16 +174,12 @@ export default function QRScanClient() {
       }
     });
 
-    // MediaStreamTrack を保持（トーチ/ズーム制御用）
+    // MediaStreamTrack を保持（トーチ制御用）
     try {
       const stream = (videoRef.current!.srcObject as MediaStream) ?? null;
       mediaTrackRef.current = stream?.getVideoTracks?.()[0] ?? null;
-      // 起動直後にオートズーム
-      const z = await applyAutoZoom(mediaTrackRef.current);
-      setZoomInfo(z);
     } catch {
       mediaTrackRef.current = null;
-      setZoomInfo("—");
     }
   }
 
@@ -238,7 +199,6 @@ export default function QRScanClient() {
       } else if (mode === "hard-720p" && elapsedSec >= SEC_TO_FULLHD) {
         await startScanner("hard-1080p");
       }
-      // 次チェック
       timer = window.setTimeout(tick, 500);
     };
 
@@ -269,7 +229,6 @@ export default function QRScanClient() {
         if (track) track.stop();
       } catch {}
       setTorchOn(false);
-      setZoomInfo("—");
       setMode("fast-720p");
     };
   }, [running]);
@@ -361,7 +320,7 @@ export default function QRScanClient() {
             停止
           </button>
 
-          {/* トーチ（対応端末のみ有効／未対応でも押下安全） */}
+          {/* トーチ（対応端末のみ） */}
           <button
             onClick={toggleTorch}
             className={`shrink-0 inline-flex items-center justify-center rounded-lg px-3 py-2 text-sm font-semibold shadow-sm ${
@@ -374,7 +333,7 @@ export default function QRScanClient() {
           </button>
 
           <span className="ml-auto text-xs rounded-md bg-white/80 px-2 py-1 ring-1 ring-slate-300 text-slate-700">
-            Mode: {mode} · Zoom: {zoomInfo}
+            Mode: {mode}
           </span>
 
           <button
