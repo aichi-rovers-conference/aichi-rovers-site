@@ -13,7 +13,8 @@ type ScanResult = {
   attendance?: { checkedAt?: string; already: boolean };
 };
 
-const ROI_RATIO = 0.6; // 画面中央の 60% 四方だけを解析（0.5~0.7程度がおすすめ）
+// 中央の正方形ROIのサイズ（短辺×この比率）
+const ROI_RATIO = 0.6;
 
 export default function QRScanClient() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -63,62 +64,63 @@ export default function QRScanClient() {
     } catch {}
   }
 
-  // 1) BarcodeDetector（対応なら高速）→ ROI検出
-  async function startWithBarcodeDetector(stream: MediaStream) {
-    if (!videoRef.current) return;
+  // 画像から中央正方形ROIを切り出して canvas に描く
+  function drawSquareRoiToCanvas(video: HTMLVideoElement, canvas: HTMLCanvasElement) {
+    const vw = video.videoWidth || 1280;
+    const vh = video.videoHeight || 720;
+    const short = Math.min(vw, vh);
+    const side = Math.floor(short * ROI_RATIO);
+    const sx = Math.floor((vw - side) / 2);
+    const sy = Math.floor((vh - side) / 2);
+
+    canvas.width = side;
+    canvas.height = side;
+
+    const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+    ctx.drawImage(video, sx, sy, side, side, 0, 0, side, side);
+
+    return { side };
+  }
+
+  // 1) BarcodeDetector（対応なら高速）→ 正方形ROIを検出
+  async function startWithBarcodeDetector() {
     const Det: any = (window as any).BarcodeDetector;
     if (!Det) throw new Error("BarcodeDetector not supported");
+    if (!videoRef.current) return;
 
     const detector = new Det({ formats: ["qr_code"] });
-    // hidden canvas（描画＆ROI切り出し）
     if (!canvasRef.current) canvasRef.current = document.createElement("canvas");
     const cvs = canvasRef.current!;
-    const ctx = cvs.getContext("2d", { willReadFrequently: true })!;
 
     const loop = async () => {
       if (!running || !videoRef.current) return;
 
-      const vw = videoRef.current.videoWidth || 1280;
-      const vh = videoRef.current.videoHeight || 720;
-      if (vw === 0 || vh === 0) {
+      // 動画メタデータまだの場合の待機
+      if (!videoRef.current.videoWidth || !videoRef.current.videoHeight) {
         rafIdRef.current = requestAnimationFrame(loop);
         return;
       }
 
-      // ROI 計算（中央の正方形寄り領域）
-      const roiW = Math.floor(vw * ROI_RATIO);
-      const roiH = Math.floor(vh * ROI_RATIO);
-      const sx = Math.floor((vw - roiW) / 2);
-      const sy = Math.floor((vh - roiH) / 2);
-
-      cvs.width = roiW;
-      cvs.height = roiH;
-      ctx.drawImage(videoRef.current, sx, sy, roiW, roiH, 0, 0, roiW, roiH);
+      drawSquareRoiToCanvas(videoRef.current, cvs);
 
       try {
-        // キャンバスから ImageBitmap を作成して検出
-        const bmp = await createImageBitmap(cvs);
-        const codes = await detector.detect(bmp);
-        // 複数出ても「一番中央に近い or 面積が大きい」順で採用
+        // 互換性の高いソース（canvas）を直接渡す
+        const codes = await detector.detect(cvs);
         if (codes && codes.length > 0) {
+          // 中央正方形なので面積で決めるだけでOK
           const pick = codes
             .map((c: any) => {
               const box = c.boundingBox;
-              const area = box.width * box.height;
-              const cx = box.x + box.width / 2;
-              const cy = box.y + box.height / 2;
-              const dx = Math.abs(cx - roiW / 2);
-              const dy = Math.abs(cy - roiH / 2);
-              const centerDist = Math.hypot(dx, dy);
-              return { code: c, area, centerDist };
+              const area = (box?.width || 0) * (box?.height || 0);
+              return { code: c, area };
             })
-            .sort((a: any, b: any) => a.centerDist - b.centerDist || b.area - a.area)[0];
+            .sort((a: any, b: any) => b.area - a.area)[0];
 
           const text = pick.code.rawValue as string;
           await handleText(text);
         }
       } catch {
-        // 無視（次フレームへ）
+        // スルー
       }
 
       rafIdRef.current = requestAnimationFrame(loop);
@@ -127,8 +129,8 @@ export default function QRScanClient() {
     rafIdRef.current = requestAnimationFrame(loop);
   }
 
-  // 2) ZXing フォールバック（ROIだけを切り出してデコード）
-  async function startWithZXing(stream: MediaStream) {
+  // 2) ZXing フォールバック（正方形ROIだけをデコード）
+  async function startWithZXing() {
     const [{ BrowserMultiFormatReader }, lib] = await Promise.all([
       import("@zxing/browser"),
       import("@zxing/library"),
@@ -148,32 +150,23 @@ export default function QRScanClient() {
     const loop = () => {
       if (!running || !videoRef.current) return;
 
-      const vw = videoRef.current.videoWidth || 1280;
-      const vh = videoRef.current.videoHeight || 720;
-      if (vw === 0 || vh === 0) {
+      if (!videoRef.current.videoWidth || !videoRef.current.videoHeight) {
         rafIdRef.current = requestAnimationFrame(loop);
         return;
       }
 
-      const roiW = Math.floor(vw * ROI_RATIO);
-      const roiH = Math.floor(vh * ROI_RATIO);
-      const sx = Math.floor((vw - roiW) / 2);
-      const sy = Math.floor((vh - roiH) / 2);
-
-      cvs.width = roiW;
-      cvs.height = roiH;
-      ctx.drawImage(videoRef.current, sx, sy, roiW, roiH, 0, 0, roiW, roiH);
+      const { side } = drawSquareRoiToCanvas(videoRef.current, cvs);
 
       try {
-        const img = ctx.getImageData(0, 0, roiW, roiH);
-        const luminance = new RGBLuminanceSource(img.data, roiW, roiH);
+        const img = ctx.getImageData(0, 0, side, side);
+        const luminance = new RGBLuminanceSource(img.data, side, side);
         const bitmap = new BinaryBitmap(new HybridBinarizer(luminance));
         const result = zxingReaderRef.current.decode(bitmap);
         if (result?.getText) {
           handleText(result.getText());
         }
       } catch {
-        // デコード失敗は普通に起きるので握りつぶし
+        // 読めないフレームは普通に起きる
       }
 
       rafIdRef.current = requestAnimationFrame(loop);
@@ -182,7 +175,7 @@ export default function QRScanClient() {
     rafIdRef.current = requestAnimationFrame(loop);
   }
 
-  // 共通：デコード後のハンドリング
+  // 共通：デコード後処理
   async function handleText(text: string) {
     try {
       if (!text || text === lastTextRef.current) return;
@@ -229,7 +222,7 @@ export default function QRScanClient() {
       setHistory((h) => [normalized, ...h].slice(0, 20));
       setShowConfirm(true);
     } finally {
-      // 同一QR連発防止の短い冷却
+      // 連続誤発火防止の短い冷却
       setTimeout(() => (lastTextRef.current = ""), 600);
       setTimeout(() => setShowConfirm(false), 2200);
     }
@@ -263,12 +256,12 @@ export default function QRScanClient() {
       videoRef.current.srcObject = stream;
       mediaTrackRef.current = stream.getVideoTracks?.()[0] ?? null;
 
-      // BarcodeDetector が速いので、まず試す
+      // BarcodeDetector 優先（速い）
       try {
-        await startWithBarcodeDetector(stream);
+        await startWithBarcodeDetector();
       } catch {
-        // 非対応なら ZXing にフォールバック
-        await startWithZXing(stream);
+        // 非対応なら ZXing へ
+        await startWithZXing();
       }
     }
 
@@ -281,22 +274,23 @@ export default function QRScanClient() {
 
     return () => {
       stopped = true;
-      // ループ停止
+
       if (rafIdRef.current != null) {
         cancelAnimationFrame(rafIdRef.current);
         rafIdRef.current = null;
       }
-      // ZXing 後始末
+
       if (zxingReaderRef.current) {
         try { zxingReaderRef.current.reset?.(); } catch {}
         zxingReaderRef.current = null;
       }
-      // カメラ停止
+
       try {
         const track = mediaTrackRef.current;
         mediaTrackRef.current = null;
         if (track) track.stop();
       } catch {}
+
       setTorchOn(false);
     };
   }, [running]);
@@ -320,7 +314,7 @@ export default function QRScanClient() {
           履歴を見る
         </button>
         <span className="text-xs text-slate-500">
-          カメラ許可が必要です。中央の枠内にQRを入れてください（誤読を防ぎ高速化）。
+          中央の枠内にQRを入れてください（隅の映り込み無視で高速化）。
         </span>
       </div>
 
@@ -331,7 +325,7 @@ export default function QRScanClient() {
         </div>
       </div>
 
-      {/* 履歴モーダル（省略：元コードと同じ） */}
+      {/* 履歴モーダル */}
       {histOpen && (
         <div className="fixed inset-0 z-[999] grid place-items-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-xl bg-white shadow-2xl ring-1 ring-slate-200">
@@ -377,26 +371,23 @@ export default function QRScanClient() {
     >
       <video ref={videoRef} autoPlay playsInline muted className="absolute inset-0 h-full w-full object-cover" />
 
-      {/* 中央ROIの可視ガイド（解析はこの枠内のみ） */}
+      {/* 中央の正方形ガイド（内側は無塗り） */}
       <div className="absolute inset-0 z-[1001] pointer-events-none">
-        <div className="relative h-full w-full">
-          {/* 黒マスク */}
-          <div className="absolute inset-0 bg-black/40" />
-          {/* 透明な窓（中央） */}
-          <div
-            className="absolute border-2"
-            style={{
-              width: `${ROI_RATIO * 100}%`,
-              height: `${ROI_RATIO * 100}%`,
-              left: `${(1 - ROI_RATIO) * 50}%`,
-              top: `${(1 - ROI_RATIO) * 50}%`,
-              transform: "translate(0, 0)",
-              boxShadow: "0 0 0 9999px rgba(0,0,0,0.4) inset",
-              borderColor: "rgba(255,255,255,0.9)",
-              borderRadius: "16px",
-            }}
-          />
-        </div>
+        {/* 外側マスクだけ薄く（内側は透明） */}
+        <div className="absolute inset-0 bg-black/30" />
+        <div
+          className="absolute border-2 border-white/90 rounded-2xl"
+          style={{
+            // vmin で正方形（画面の短辺基準）
+            width: `${ROI_RATIO * 100}vmin`,
+            aspectRatio: "1 / 1",
+            left: "50%",
+            top: "50%",
+            transform: "translate(-50%, -50%)",
+            // 内側を透明に保つため、外側だけ覆うトリック
+            boxShadow: "0 0 0 9999px rgba(0,0,0,0.3)",
+          }}
+        />
       </div>
 
       {/* 上バー */}
@@ -455,7 +446,7 @@ export default function QRScanClient() {
         </div>
       )}
 
-      {/* 履歴ドロワー（省略：元コードと同じ） */}
+      {/* 履歴ドロワー */}
       <div
         className={`absolute inset-x-0 bottom-0 z-[1002] max-h-[60svh] translate-y-full rounded-t-2xl bg-white shadow-lg ring-1 ring-slate-200 transition-transform duration-300 ${
           histOpen ? "!translate-y-0" : ""
