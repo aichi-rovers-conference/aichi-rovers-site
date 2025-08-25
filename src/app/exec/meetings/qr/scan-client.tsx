@@ -21,6 +21,13 @@ const SEC_TO_FULLHD = 5.0;     // さらに成功がなければ 1080p に切替
 
 type ScanMode = "fast-720p" | "hard-720p" | "hard-1080p";
 
+type PendingConfirm = {
+  rawText: string;
+  meetingCode: string;
+  participantId: string;
+  name?: string;
+};
+
 export default function QRScanClient() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [mounted, setMounted] = useState(false);        // Portal準備
@@ -28,11 +35,16 @@ export default function QRScanClient() {
   const [last, setLast] = useState<ScanResult | null>(null);
   const [history, setHistory] = useState<ScanResult[]>([]);
   const [histOpen, setHistOpen] = useState(false);      // 履歴ドロワー
-  const [showConfirm, setShowConfirm] = useState(false);// 前面トースト
+  const [showConfirmToast, setShowConfirmToast] = useState(false);// 下部トースト
   const [torchOn, setTorchOn] = useState(false);        // トーチON/OFF
 
   // ステータス表示（モードのみ）
   const [mode, setMode] = useState<ScanMode>("fast-720p");
+
+  // 連続読み取り対策：確認モーダル制御 & ロック
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [pending, setPending] = useState<PendingConfirm | null>(null);
+  const lockedRef = useRef(false);
 
   const controlsRef = useRef<import("@zxing/browser").IScannerControls | null>(null);
   const mediaTrackRef = useRef<MediaStreamTrack | null>(null);
@@ -118,59 +130,47 @@ export default function QRScanClient() {
     // ---- スキャン開始 ----
     controlsRef.current = await reader.decodeFromConstraints(constraints, videoRef.current!, async (result) => {
       if (!result) return;
+      if (lockedRef.current) return; // ★ 確認中は無視して重複発火を防ぐ
+
       try {
         const text = result.getText();
         if (!text || text === lastTextRef.current) return; // 連続同一ガード
         lastTextRef.current = text;
-        lastSuccessAtRef.current = performance.now();
 
+        // まずQRをJSONとして検証（この段階ではサーバー保存しない）
         let payload: any;
         try {
           payload = JSON.parse(text);
         } catch {
           setLast({ ok: false, message: "QRの内容が不正です（JSONではありません）" });
-          setShowConfirm(true);
+          setShowConfirmToast(true);
+          // しばらく同一QRを無視
+          setTimeout(() => { lastTextRef.current = ""; }, 800);
+          setTimeout(() => setShowConfirmToast(false), 2200);
           return;
         }
         if (!payload || payload.type !== "arc-attendance" || !payload.meeting || !payload.participantId) {
           setLast({ ok: false, message: "不正なQRです（必須フィールド不足）" });
-          setShowConfirm(true);
+          setShowConfirmToast(true);
+          setTimeout(() => { lastTextRef.current = ""; }, 800);
+          setTimeout(() => setShowConfirmToast(false), 2200);
           return;
         }
 
-        const r = await fetch("/api/attendance/checkin", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-
-        const j = await r.json().catch(() => ({}));
-        let normalized: ScanResult;
-        if (r.ok && j?.ok) {
-          const meetingCode: string = j?.meeting?.code ?? j?.meeting ?? payload.meeting ?? "";
-          const already: boolean = j?.attendance?.already ?? j?.already ?? false;
-          const checkedAt: string | undefined = j?.attendance?.checkedAt ?? j?.checkedAt ?? undefined;
-          const participant = {
-            id: j?.participant?.id ?? j?.participantId ?? payload.participantId,
-            name: j?.participant?.name ?? j?.name ?? "",
-            troop: j?.participant?.troop,
-            district: j?.participant?.district,
-          };
-          normalized = { ok: true, meeting: { code: meetingCode }, participant, attendance: { already, checkedAt } };
-        } else {
-          normalized = { ok: false, message: j?.error || r.statusText || "保存に失敗しました" };
-        }
-
-        setLast(normalized);
-        setHistory((h) => [normalized, ...h].slice(0, 20));
-        setShowConfirm(true);
+        // ★ ここで確認モーダルを表示（サーバーにはまだ送らない）
+        const meetingCode: string = payload.meeting ?? "";
+        const participantId: string = payload.participantId ?? "";
+        const name: string | undefined = payload.name; // QR内にあれば表示
+        setPending({ rawText: text, meetingCode, participantId, name });
+        lockedRef.current = true; // 確認が終わるまでコールバックを無視
+        setConfirmOpen(true);
       } catch {
+        // 例外時はロック解除して次へ
+        lockedRef.current = false;
         setLast({ ok: false, message: "読み取り処理に失敗しました" });
-        setShowConfirm(true);
-      } finally {
-        // 次の読み取りに備えて短時間で解除
-        setTimeout(() => { lastTextRef.current = ""; }, 600);
-        setTimeout(() => setShowConfirm(false), 2200);
+        setShowConfirmToast(true);
+        setTimeout(() => { lastTextRef.current = ""; }, 800);
+        setTimeout(() => setShowConfirmToast(false), 2200);
       }
     });
 
@@ -215,7 +215,7 @@ export default function QRScanClient() {
 
     startScanner("fast-720p").catch(() => {
       setLast({ ok: false, message: "カメラの初期化に失敗しました" });
-      setShowConfirm(true);
+      setShowConfirmToast(true);
     });
 
     return () => {
@@ -230,8 +230,64 @@ export default function QRScanClient() {
       } catch {}
       setTorchOn(false);
       setMode("fast-720p");
+      // 念のためロック解除
+      lockedRef.current = false;
+      setConfirmOpen(false);
+      setPending(null);
     };
   }, [running]);
+
+  // ====== 確認モーダルの操作 ======
+
+  // 「はい、記録する」
+  async function onConfirmRecord() {
+    if (!pending) return;
+    try {
+      // サーバーに保存
+      const r = await fetch("/api/attendance/checkin", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: pending.rawText, // 元のQR JSONをそのまま送る
+      });
+      const j = await r.json().catch(() => ({}));
+
+      let normalized: ScanResult;
+      if (r.ok && j?.ok) {
+        const meetingCode: string = j?.meeting?.code ?? j?.meeting ?? pending.meetingCode ?? "";
+        const already: boolean = j?.attendance?.already ?? j?.already ?? false;
+        const checkedAt: string | undefined = j?.attendance?.checkedAt ?? j?.checkedAt ?? undefined;
+        const participant = {
+          id: j?.participant?.id ?? pending.participantId,
+          name: j?.participant?.name ?? pending.name ?? "",
+          troop: j?.participant?.troop,
+          district: j?.participant?.district,
+        };
+        normalized = { ok: true, meeting: { code: meetingCode }, participant, attendance: { already, checkedAt } };
+        lastSuccessAtRef.current = performance.now(); // 成功時にリセット
+      } else {
+        normalized = { ok: false, message: j?.error || r.statusText || "保存に失敗しました" };
+      }
+
+      setLast(normalized);
+      setHistory((h) => [normalized, ...h].slice(0, 20));
+      setShowConfirmToast(true);
+    } finally {
+      // モーダル閉じ＆ロック解除、次スキャンへ
+      setConfirmOpen(false);
+      setPending(null);
+      lockedRef.current = false;
+      lastTextRef.current = ""; // 同じQRも再度読めるように（勝手連打はロックで防止済）
+      setTimeout(() => setShowConfirmToast(false), 2200);
+    }
+  }
+
+  // 「いいえ、やり直す」
+  function onCancelRecord() {
+    setConfirmOpen(false);
+    setPending(null);
+    lockedRef.current = false;  // スキャン再開
+    lastTextRef.current = "";   // 次の検出を受け付ける
+  }
 
   // ===== UI（開始前） =====
   const PreView = (
@@ -251,7 +307,7 @@ export default function QRScanClient() {
           <History className="h-4 w-4" />
           履歴を見る
         </button>
-        <span className="text-xs text-slate-500">カメラ許可が必要です。暗い場所では読み取り精度が落ちます。</span>
+        <span className="text-xs text-slate-500">QRをかざすと毎回確認画面が出ます。</span>
       </div>
 
       <div className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-black/5 aspect-video grid place-items-center">
@@ -347,8 +403,43 @@ export default function QRScanClient() {
         </div>
       </div>
 
-      {/* 読み取り確認：前面トースト */}
-      {showConfirm && last && (
+      {/* ★ 確認モーダル（中央） */}
+      {confirmOpen && pending && (
+        <div className="absolute inset-0 z-[1002] grid place-items-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200">
+            <div className="p-4">
+              <div className="text-sm text-slate-600">出席の確認</div>
+              <div className="mt-1 text-base font-semibold text-slate-900">
+                {pending.name ? `${pending.name} さん` : "（氏名不明）"}
+              </div>
+              <div className="mt-1 text-sm text-slate-700">
+                ミーティング: <b>{pending.meetingCode || "—"}</b>
+              </div>
+              <div className="mt-0.5 text-xs text-slate-500">参加者ID: {pending.participantId}</div>
+
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <button
+                  onClick={onCancelRecord}
+                  className="rounded-lg px-4 py-2 text-sm font-semibold ring-1 ring-slate-200 bg-white text-slate-900"
+                >
+                  いいえ、やり直す
+                </button>
+                <button
+                  onClick={onConfirmRecord}
+                  className="rounded-lg px-4 py-2 text-sm font-semibold bg-emerald-600 text-white"
+                >
+                  はい、記録する
+                </button>
+              </div>
+            </div>
+          </div>
+          {/* 背景クリックで閉じないようにする場合は以下を外す */}
+          <button className="fixed inset-0 -z-10" aria-label="no-close" />
+        </div>
+      )}
+
+      {/* 読み取り結果トースト（保存成功/失敗） */}
+      {showConfirmToast && last && (
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[1001] p-4 pb-6">
           <div
             className={`pointer-events-auto w-full rounded-2xl px-4 py-3 text-base font-semibold shadow-2xl ring-1 backdrop-blur ${
