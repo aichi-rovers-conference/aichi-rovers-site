@@ -14,7 +14,7 @@ type ScanResult = {
 };
 
 // 中央の正方形ROI（短辺×比率）
-const ROI_RATIO = 0.6;
+const ROI_RATIO = 0.5;
 // BarcodeDetectorで検出0件が続いたらZXingへ切替える閾値（約1秒相当）
 const BD_EMPTY_FRAMES_BEFORE_FALLBACK = 45;
 
