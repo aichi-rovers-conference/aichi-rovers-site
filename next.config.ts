@@ -36,15 +36,16 @@ const nextConfig: NextConfig = {
 
   // 画像最適化のリモート許可
   images: {
-    // Vercel Blob（公開バケット）のドメインを許可
     remotePatterns: [
-      { protocol: "https", hostname: "**.vercel-storage.com" },
+      // ✅ Vercel Blob の公開URL（<bucket>.public.blob.vercel-storage.com）
+      { protocol: "https", hostname: "*.public.blob.vercel-storage.com" },
+      // （念のため）public サブドメインが無い形も許可したい場合
+      { protocol: "https", hostname: "*.blob.vercel-storage.com" },
       // 他のCDN/ストレージを使うならここに追加:
       // { protocol: "https", hostname: "dxxxxx.cloudfront.net" },
       // { protocol: "https", hostname: "bucket.s3.ap-northeast-1.amazonaws.com" },
     ],
-    // WebP/AVIF を優先（任意）
-    formats: ["image/avif", "image/webp"],
+    formats: ["image/avif", "image/webp"], // WebP/AVIF を優先（任意）
   },
 
   // 推奨（セキュリティ上のノイズ削減）
