@@ -13,8 +13,10 @@ type ScanResult = {
   attendance?: { checkedAt?: string; already: boolean };
 };
 
-// 中央の正方形ROIのサイズ（短辺×この比率）
+// 中央の正方形ROI（短辺×比率）
 const ROI_RATIO = 0.6;
+// BarcodeDetectorで検出0件が続いたらZXingへ切替える閾値（約1秒相当）
+const BD_EMPTY_FRAMES_BEFORE_FALLBACK = 45;
 
 export default function QRScanClient() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -25,17 +27,18 @@ export default function QRScanClient() {
   const [histOpen, setHistOpen] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
+  const [engine, setEngine] = useState<"BarcodeDetector" | "ZXing" | "-">("-");
   const mediaTrackRef = useRef<MediaStreamTrack | null>(null);
   const lastTextRef = useRef<string>("");
 
-  // ZXing フォールバック用
-  const zxingReaderRef = useRef<any>(null);
+  // ループ・キャンバス・ZXing
   const rafIdRef = useRef<number | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const zxingReaderRef = useRef<any>(null);
 
   useEffect(() => setMounted(true), []);
 
-  // ボディスクロール無効
+  // ページスクロール無効
   useEffect(() => {
     const el = document.documentElement;
     const body = document.body;
@@ -52,7 +55,7 @@ export default function QRScanClient() {
     };
   }, [running]);
 
-  // トーチ切替
+  // トーチ
   async function toggleTorch() {
     const track = mediaTrackRef.current;
     if (!track) return;
@@ -64,7 +67,7 @@ export default function QRScanClient() {
     } catch {}
   }
 
-  // 画像から中央正方形ROIを切り出して canvas に描く
+  // 中央正方形ROIをcanvasへ描画
   function drawSquareRoiToCanvas(video: HTMLVideoElement, canvas: HTMLCanvasElement) {
     const vw = video.videoWidth || 1280;
     const vh = video.videoHeight || 720;
@@ -72,30 +75,38 @@ export default function QRScanClient() {
     const side = Math.floor(short * ROI_RATIO);
     const sx = Math.floor((vw - side) / 2);
     const sy = Math.floor((vh - side) / 2);
+    const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
 
     canvas.width = side;
     canvas.height = side;
-
-    const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
     ctx.drawImage(video, sx, sy, side, side, 0, 0, side, side);
-
-    return { side };
+    return side;
   }
 
-  // 1) BarcodeDetector（対応なら高速）→ 正方形ROIを検出
-  async function startWithBarcodeDetector() {
-    const Det: any = (window as any).BarcodeDetector;
-    if (!Det) throw new Error("BarcodeDetector not supported");
-    if (!videoRef.current) return;
+  // BarcodeDetector（対応 & 調子が良い時は爆速）※未対応や不調なら自動フォールバック
+  async function startWithBarcodeDetector(): Promise<boolean> {
+    const BD: any = (window as any).BarcodeDetector;
+    if (!BD) return false;
 
-    const detector = new Det({ formats: ["qr_code"] });
+    // 端末が本当に qr_code をサポートしているか確認
+    try {
+      const formats: string[] | undefined = await BD.getSupportedFormats?.();
+      if (!formats || !formats.includes("qr_code")) return false;
+    } catch {
+      // getSupportedFormats 未実装なら、とりあえず試す
+    }
+
+    if (!videoRef.current) return false;
     if (!canvasRef.current) canvasRef.current = document.createElement("canvas");
     const cvs = canvasRef.current!;
+    const detector = new BD({ formats: ["qr_code"] });
+
+    let emptyCount = 0;
+    setEngine("BarcodeDetector");
 
     const loop = async () => {
       if (!running || !videoRef.current) return;
 
-      // 動画メタデータまだの場合の待機
       if (!videoRef.current.videoWidth || !videoRef.current.videoHeight) {
         rafIdRef.current = requestAnimationFrame(loop);
         return;
@@ -104,32 +115,41 @@ export default function QRScanClient() {
       drawSquareRoiToCanvas(videoRef.current, cvs);
 
       try {
-        // 互換性の高いソース（canvas）を直接渡す
         const codes = await detector.detect(cvs);
         if (codes && codes.length > 0) {
-          // 中央正方形なので面積で決めるだけでOK
+          emptyCount = 0;
+          // 面積最大を採用（正方形ROIなので十分）
           const pick = codes
             .map((c: any) => {
-              const box = c.boundingBox;
-              const area = (box?.width || 0) * (box?.height || 0);
-              return { code: c, area };
+              const box = c.boundingBox || {};
+              const area = (box.width || 0) * (box.height || 0);
+              return { c, area };
             })
             .sort((a: any, b: any) => b.area - a.area)[0];
-
-          const text = pick.code.rawValue as string;
+          const text: string = pick.c.rawValue;
           await handleText(text);
+        } else {
+          emptyCount++;
+          // 検出0件が続く＝不調と判断→ZXingへ切替
+          if (emptyCount >= BD_EMPTY_FRAMES_BEFORE_FALLBACK) {
+            await switchToZXing();
+            return; // ZXingのループへ移行するので抜ける
+          }
         }
       } catch {
-        // スルー
+        // 例外が多発する端末もある→即ZXingへ
+        await switchToZXing();
+        return;
       }
 
       rafIdRef.current = requestAnimationFrame(loop);
     };
 
     rafIdRef.current = requestAnimationFrame(loop);
+    return true;
   }
 
-  // 2) ZXing フォールバック（正方形ROIだけをデコード）
+  // ZXing（確実に動くフォールバック）
   async function startWithZXing() {
     const [{ BrowserMultiFormatReader }, lib] = await Promise.all([
       import("@zxing/browser"),
@@ -142,6 +162,7 @@ export default function QRScanClient() {
     hints.set(DecodeHintType.TRY_HARDER, false);
 
     zxingReaderRef.current = new BrowserMultiFormatReader(hints);
+    setEngine("ZXing");
 
     if (!canvasRef.current) canvasRef.current = document.createElement("canvas");
     const cvs = canvasRef.current!;
@@ -155,18 +176,16 @@ export default function QRScanClient() {
         return;
       }
 
-      const { side } = drawSquareRoiToCanvas(videoRef.current, cvs);
+      const side = drawSquareRoiToCanvas(videoRef.current, cvs);
 
       try {
         const img = ctx.getImageData(0, 0, side, side);
         const luminance = new RGBLuminanceSource(img.data, side, side);
         const bitmap = new BinaryBitmap(new HybridBinarizer(luminance));
         const result = zxingReaderRef.current.decode(bitmap);
-        if (result?.getText) {
-          handleText(result.getText());
-        }
+        if (result?.getText) handleText(result.getText());
       } catch {
-        // 読めないフレームは普通に起きる
+        // NotFound 等は普通に出る
       }
 
       rafIdRef.current = requestAnimationFrame(loop);
@@ -175,7 +194,18 @@ export default function QRScanClient() {
     rafIdRef.current = requestAnimationFrame(loop);
   }
 
-  // 共通：デコード後処理
+  // BarcodeDetector → ZXing 切替ヘルパ
+  async function switchToZXing() {
+    // 既存ループ止める
+    if (rafIdRef.current != null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+    try { zxingReaderRef.current?.reset?.(); } catch {}
+    await startWithZXing();
+  }
+
+  // デコード後処理
   async function handleText(text: string) {
     try {
       if (!text || text === lastTextRef.current) return;
@@ -222,20 +252,18 @@ export default function QRScanClient() {
       setHistory((h) => [normalized, ...h].slice(0, 20));
       setShowConfirm(true);
     } finally {
-      // 連続誤発火防止の短い冷却
-      setTimeout(() => (lastTextRef.current = ""), 600);
+      setTimeout(() => (lastTextRef.current = ""), 600);   // 連発防止の冷却
       setTimeout(() => setShowConfirm(false), 2200);
     }
   }
 
-  // カメラ開始
+  // カメラ開始/終了
   useEffect(() => {
     let stopped = false;
 
     async function start() {
       if (!videoRef.current) return;
 
-      // 720p 背面カメラ（過度な高解像度は避ける）
       const constraints: MediaStreamConstraints = {
         audio: false,
         video: {
@@ -243,7 +271,7 @@ export default function QRScanClient() {
           width: { ideal: 1280, max: 1280 },
           height: { ideal: 720, max: 720 },
           frameRate: { ideal: 30, max: 30 },
-          advanced: [{ focusMode: "continuous" } as any],
+          advanced: [{ focusMode: "continuous" } as any], // 型エラー回避のため any
         },
       };
 
@@ -256,17 +284,14 @@ export default function QRScanClient() {
       videoRef.current.srcObject = stream;
       mediaTrackRef.current = stream.getVideoTracks?.()[0] ?? null;
 
-      // BarcodeDetector 優先（速い）
-      try {
-        await startWithBarcodeDetector();
-      } catch {
-        // 非対応なら ZXing へ
-        await startWithZXing();
-      }
+      // まずBarcodeDetector、本当に使えないなら即ZXing
+      const bdStarted = await startWithBarcodeDetector();
+      if (!bdStarted) await startWithZXing();
     }
 
     if (running) {
       start().catch(() => {
+        setEngine("-");
         setLast({ ok: false, message: "カメラの初期化に失敗しました" });
         setShowConfirm(true);
       });
@@ -274,16 +299,12 @@ export default function QRScanClient() {
 
     return () => {
       stopped = true;
-
       if (rafIdRef.current != null) {
         cancelAnimationFrame(rafIdRef.current);
         rafIdRef.current = null;
       }
-
-      if (zxingReaderRef.current) {
-        try { zxingReaderRef.current.reset?.(); } catch {}
-        zxingReaderRef.current = null;
-      }
+      try { zxingReaderRef.current?.reset?.(); } catch {}
+      zxingReaderRef.current = null;
 
       try {
         const track = mediaTrackRef.current;
@@ -292,6 +313,7 @@ export default function QRScanClient() {
       } catch {}
 
       setTorchOn(false);
+      setEngine("-");
     };
   }, [running]);
 
@@ -314,7 +336,7 @@ export default function QRScanClient() {
           履歴を見る
         </button>
         <span className="text-xs text-slate-500">
-          中央の枠内にQRを入れてください（隅の映り込み無視で高速化）。
+          中央の枠内にQRを入れてください（隅の映り込みを無視して高速化）。
         </span>
       </div>
 
@@ -324,37 +346,6 @@ export default function QRScanClient() {
           <div className="mt-1 text-sm">「カメラ開始」を押すと全画面スキャンに切り替わります。</div>
         </div>
       </div>
-
-      {/* 履歴モーダル */}
-      {histOpen && (
-        <div className="fixed inset-0 z-[999] grid place-items-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white shadow-2xl ring-1 ring-slate-200">
-            <div className="flex items-center justify-between p-3">
-              <h3 className="text-sm font-semibold text-slate-800">読み取り履歴（直近20件）</h3>
-              <button onClick={() => setHistOpen(false)} className="text-sm rounded-md px-2 py-1 ring-1 ring-slate-200">
-                閉じる
-              </button>
-            </div>
-            <div className="max-h-[60vh] overflow-y-auto px-3 pb-4 space-y-2">
-              {history.length === 0 && <div className="text-xs text-slate-500">まだありません</div>}
-              {history.map((h, i) => (
-                <div key={i} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
-                  {h.ok ? (
-                    <div className="truncate">
-                      <b>{h.participant?.name || "（氏名不明）"}</b> / {h.meeting?.code ?? "—"} /{" "}
-                      {h.attendance?.already ? "既出席" : "新規"} /{" "}
-                      {h.attendance?.checkedAt ? new Date(h.attendance.checkedAt).toLocaleString() : "—"}
-                    </div>
-                  ) : (
-                    <span className="text-rose-600">{h.message}</span>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-          <button className="fixed inset-0 -z-10" onClick={() => setHistOpen(false)} aria-label="close history" />
-        </div>
-      )}
     </div>
   );
 
@@ -371,28 +362,24 @@ export default function QRScanClient() {
     >
       <video ref={videoRef} autoPlay playsInline muted className="absolute inset-0 h-full w-full object-cover" />
 
-      {/* 中央の正方形ガイド（内側は無塗り） */}
+      {/* 正方形ガイド（内側は無塗り） */}
       <div className="absolute inset-0 z-[1001] pointer-events-none">
-        {/* 外側マスクだけ薄く（内側は透明） */}
-        <div className="absolute inset-0 bg-black/30" />
         <div
           className="absolute border-2 border-white/90 rounded-2xl"
           style={{
-            // vmin で正方形（画面の短辺基準）
-            width: `${ROI_RATIO * 100}vmin`,
+            width: `${ROI_RATIO * 100}vmin`,    // 画面短辺基準の正方形
             aspectRatio: "1 / 1",
             left: "50%",
             top: "50%",
             transform: "translate(-50%, -50%)",
-            // 内側を透明に保つため、外側だけ覆うトリック
-            boxShadow: "0 0 0 9999px rgba(0,0,0,0.3)",
+            boxShadow: "0 0 0 9999px rgba(0,0,0,0.28)", // 外側だけ少し暗く
           }}
         />
       </div>
 
-      {/* 上バー */}
+      {/* 上バー（現在のエンジン名表示） */}
       <div className="pointer-events-auto absolute left-0 right-0 top-0 z-[1002] p-3">
-        <div className="flex flex-nowrap gap-2">
+        <div className="flex flex-nowrap items-center gap-2">
           <button
             onClick={() => setRunning(false)}
             className="shrink-0 inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold shadow-sm bg-rose-600 text-white"
@@ -410,14 +397,9 @@ export default function QRScanClient() {
             <Sun className="h-4 w-4" />
             {torchOn ? "点灯中" : "トーチ"}
           </button>
-          <button
-            onClick={() => setHistOpen(true)}
-            className="shrink-0 inline-flex items-center justify-center rounded-lg px-3 py-2 text-sm font-semibold shadow-sm bg-white/90 text-slate-900 backdrop-blur"
-            aria-expanded={histOpen}
-          >
-            <History className="h-4 w-4" />
-            履歴
-          </button>
+          <span className="ml-auto text-xs rounded-md bg-white/80 px-2 py-1 ring-1 ring-slate-300 text-slate-700">
+            Engine: {engine}
+          </span>
         </div>
       </div>
 
@@ -446,39 +428,7 @@ export default function QRScanClient() {
         </div>
       )}
 
-      {/* 履歴ドロワー */}
-      <div
-        className={`absolute inset-x-0 bottom-0 z-[1002] max-h-[60svh] translate-y-full rounded-t-2xl bg-white shadow-lg ring-1 ring-slate-200 transition-transform duration-300 ${
-          histOpen ? "!translate-y-0" : ""
-        }`}
-      >
-        <div className="px-4 pt-2 pb-3">
-          <div className="mx-auto mt-1 h-1.5 w-12 rounded-full bg-slate-300" />
-          <div className="mt-2 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-slate-800">読み取り履歴（直近20件）</h3>
-            <button onClick={() => setHistOpen(false)} className="text-sm rounded-md px-2 py-1 ring-1 ring-slate-200">
-              閉じる
-            </button>
-          </div>
-          <div className="mt-2 max-h-[44svh] overflow-y-auto space-y-2">
-            {history.length === 0 && <div className="text-xs text-slate-500">まだありません</div>}
-            {history.map((h, i) => (
-              <div key={i} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
-                {h.ok ? (
-                  <div className="truncate">
-                    <b>{h.participant?.name || "（氏名不明）"}</b> / {h.meeting?.code ?? "—"} /{" "}
-                    {h.attendance?.already ? "既出席" : "新規"} /{" "}
-                    {h.attendance?.checkedAt ? new Date(h.attendance.checkedAt).toLocaleString() : "—"}
-                  </div>
-                ) : (
-                  <span className="text-rose-600">{h.message}</span>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
+      {/* 履歴ドロワー（必要なら元のを戻せます） */}
       {histOpen && (
         <button
           aria-label="close history"
