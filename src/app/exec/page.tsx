@@ -14,6 +14,7 @@ import {
   ChevronRight,
   LogOut,
   UserCog,
+  CalendarCheck,
 } from "lucide-react";
 
 // 追加：必ずSSRで再評価（ログアウト後の見え残り防止）
@@ -25,6 +26,7 @@ export default async function ExecPage() {
   const cookieStore = await cookies();
   const token = cookieStore.get(COOKIE_NAME)?.value ?? "";
   const session = token ? await verifyToken(token) : null;
+  
 
   if (!session) {
     redirect("/?auth=required");
@@ -49,7 +51,7 @@ export default async function ExecPage() {
     {
       href: "/exec/meetings",
       icon: <CalendarDays className="size-6 md:size-7 xl:size-8" />,
-      title: "会の管理",
+      title: "定例会の管理",
       desc: "定例会の作成・出席管理・集計ダウンロード",
       accent: "amber",
     },
@@ -61,6 +63,18 @@ export default async function ExecPage() {
       accent: "blue",
     },
   ];
+
+  const canEditCalendar = session.role === "ADMIN" || session.role === "EDITOR" || session.isSuper;
+
+  if(canEditCalendar) {
+    links.push({
+      href: "/exec/calendar",
+      icon: <CalendarCheck className="size-6 md:size-7 xl:size-8" />,
+      title: "事業カレンダー管理",
+      desc: "募集と年間スケジュールの追加・編集・公開設定",
+      accent: "red",
+    });
+  }
 
   if (isAdmin) {
     links.push({
