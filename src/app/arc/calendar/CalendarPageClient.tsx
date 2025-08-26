@@ -1,4 +1,4 @@
-// app/arc/calendar/page.tsx など、このページファイルをまるっと置き換え
+// app/arc/calendar/page.tsx
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -6,54 +6,40 @@ import Image from "next/image";
 import { motion, useScroll, useTransform } from "framer-motion";
 import ArcHeader1 from "@/src/components/ArcHeader1";
 import ArcFooter from "@/src/components/ArcFooter";
-/** === 設定（編集者向け） ===========================================
- * 1) イベント一覧の置き場所：/public/calendar/events.json
- *    例:
- *    [
- *      {"date":"2025-04-29","title":"愛知ローバームート","url":"https://..."},
- *      {"date":"2025-05-18","title":"地区合同ハイク"},
- *      {"date":"2025-08-10","title":"ARC定例会 #3","url":"/arc/meetings"}
- *    ]
- *
- * 2) 最終更新日時の置き場所：/public/calendar-last-updated.txt
- *    例: 2025-08-15 09:30 更新
- *
- * 3) Googleカレンダーを併用したい場合は iframe を追記してOK（編集者はカレンダーを更新するだけ）
- * ================================================================ */
-const EVENTS_JSON_URL = "/calendar/events.json";
-const LAST_UPDATED_TXT_URL = "/calendar-last-updated.txt";
 
-/* 型 */
+const EVENTS_API_URL = "/api/calendar/events";
+const RECRUIT_API_URL = "/api/calendar/recruitings";
+
 type EventItem = {
-  date: string; // ISO形式 "YYYY-MM-DD"
+  date: string; // "YYYY-MM-DD"
   title: string;
   url?: string;
   note?: string;
   area?: string;
 };
 
+type RecruitingItem = {
+  id: string;
+  title: string;
+  date: string;      // 実施日
+  deadline: string;  // 参加期限
+  area: string;
+  url?: string;
+  urlDesc?: string;
+  imageUrl?: string;
+};
+
 function groupByMonth(events: EventItem[]) {
   const map: Record<number, EventItem[]> = {};
   events.forEach((e) => {
     const m = new Date(e.date + "T00:00:00").getMonth(); // 0-11
-    if (!map[m]) map[m] = [];
-    map[m].push(e);
+    (map[m] ||= []).push(e);
   });
-  // 月内は日付順
-  for (const m in map) {
-    map[m]!.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-  }
+  for (const m in map) map[m]!.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   return map;
 }
 
-/** 月カード（年間一覧） */
-function MonthCard({
-  monthIndex,
-  items = [],
-}: {
-  monthIndex: number; // 0-11
-  items: EventItem[];
-}) {
+function MonthCard({ monthIndex, items = [] }: { monthIndex: number; items: EventItem[] }) {
   const monthName = `${monthIndex + 1}月`;
   return (
     <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-4 sm:p-5 flex flex-col">
@@ -99,8 +85,15 @@ function MonthCard({
   );
 }
 
+async function safeJson(res: Response) {
+  const ct = res.headers.get("content-type") || "";
+  if (ct.includes("application/json")) return res.json();
+  const text = await res.text();
+  try { return JSON.parse(text); } catch { return { error: text || "Unknown error" }; }
+}
+
 export default function CalendarPage() {
-  // ===== ヒーロー（モバイルでの動きを控えめに） =====
+  // ===== ヒーロー =====
   const heroRef = useRef<HTMLDivElement | null>(null);
   const { scrollYProgress } = useScroll({ target: heroRef, offset: ["start start", "end start"] });
   const yImg = useTransform(scrollYProgress, [0, 1], [0, 240]);
@@ -120,27 +113,45 @@ export default function CalendarPage() {
   // ===== データ読込 =====
   const [events, setEvents] = useState<EventItem[] | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string>("—");
+  const [recruits, setRecruits] = useState<RecruitingItem[] | null>(null);
+  const [recruitsUpdated, setRecruitsUpdated] = useState<string>("—");
 
   useEffect(() => {
-    // イベント一覧（JSON）
-    fetch(EVENTS_JSON_URL, { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data: EventItem[]) => {
-        if (Array.isArray(data)) {
-          // 不正データを軽く防御
-          const safe = data.filter((d) => d?.date && d?.title);
-          setEvents(safe);
-        } else {
-          setEvents([]);
-        }
+    const y = new Date().getFullYear();
+    // 年間スケジュール
+    fetch(`${EVENTS_API_URL}?year=${y}`, { cache: "no-store" })
+      .then(safeJson)
+      .then((j) => {
+        const data: EventItem[] = (j.items || []).map((x: any) => ({
+          date: (x.date || "").slice(0, 10),
+          title: x.title,
+          url: x.url || undefined,
+          note: x.note || undefined,
+          area: x.area || undefined,
+        }));
+        setEvents(data);
+        setLastUpdated(j.lastUpdated ? new Date(j.lastUpdated).toLocaleString() : "—");
       })
-      .catch(() => setEvents([]));
+      .catch(() => { setEvents([]); setLastUpdated("—"); });
 
-    // 最終更新
-    fetch(LAST_UPDATED_TXT_URL, { cache: "no-store" })
-      .then((r) => (r.ok ? r.text() : "—"))
-      .then((t) => setLastUpdated(t.trim() || "—"))
-      .catch(() => setLastUpdated("—"));
+    // 募集（公開 & 締切未到来が返る想定）
+    fetch(RECRUIT_API_URL, { cache: "no-store" })
+      .then(safeJson)
+      .then((j) => {
+        const data: RecruitingItem[] = (j.items || []).map((x: any) => ({
+          id: String(x.id),
+          title: x.title,
+          date: (x.date || "").slice(0, 10),
+          deadline: (x.deadline || "").slice(0, 10),
+          area: x.area,
+          url: x.url || undefined,
+          urlDesc: x.urlDesc || undefined,
+          imageUrl: x.imageUrl || undefined,
+        }));
+        setRecruits(data);
+        setRecruitsUpdated(j.lastUpdated ? new Date(j.lastUpdated).toLocaleString() : "—");
+      })
+      .catch(() => { setRecruits([]); setRecruitsUpdated("—"); });
   }, []);
 
   const byMonth = useMemo(() => groupByMonth(events ?? []), [events]);
@@ -170,16 +181,10 @@ export default function CalendarPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.9, ease: "easeOut" }}
         >
-          <h1
-            className="text-white font-extrabold drop-shadow-lg leading-tight"
-            style={{ fontSize: "clamp(28px, 7vw, 48px)" }} // 28〜48px 可変
-          >
+          <h1 className="text-white font-extrabold drop-shadow-lg leading-tight" style={{ fontSize: "clamp(28px, 7vw, 48px)" }}>
             事業カレンダー
           </h1>
-          <p
-            className="text-white/90 font-medium mt-2 sm:mt-3"
-            style={{ fontSize: "clamp(14px, 4.6vw, 24px)" }} // 14〜24px 可変
-          >
+          <p className="text-white/90 font-medium mt-2 sm:mt-3" style={{ fontSize: "clamp(14px, 4.6vw, 24px)" }}>
             ARC Annual Schedule & Recruiting
           </p>
         </motion.div>
@@ -188,62 +193,102 @@ export default function CalendarPage() {
       {/* 現在募集中の案内 */}
       <section className="w-full bg-white py-10 sm:py-12 md:py-14 px-4 sm:px-6 md:px-10 lg:px-16">
         <div className="mx-auto max-w-6xl">
-          <h2
-            className="text-red-600 font-bold mb-2 sm:mb-3 leading-tight"
-            style={{ fontSize: "clamp(22px, 4.8vw, 36px)" }}
-          >
+          <h2 className="text-red-600 font-bold mb-2 sm:mb-3 leading-tight" style={{ fontSize: "clamp(22px, 4.8vw, 36px)" }}>
             現在募集中の案内
           </h2>
-          <p className="text-[13px] sm:text-sm text-gray-600 mb-4">
-            ※URLをクリックすると開催要項に移動できます
-          </p>
+          <p className="text-[13px] sm:text-sm text-gray-600 mb-4">※URLをクリックすると開催要項に移動できます</p>
 
-          {/* 今は募集なし（文言固定） */}
-          <div className="rounded-xl border border-gray-200 bg-white p-4 sm:p-5 shadow-sm">
-            <p className="text-gray-800 font-medium text-sm sm:text-base">現在募集している事業はありません。</p>
-          </div>
+          {recruits === null ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              {Array.from({ length: 2 }).map((_, i) => (
+                <div key={i} className="h-44 rounded-2xl border border-gray-200 bg-gray-50 animate-pulse" />
+              ))}
+            </div>
+          ) : recruits.length === 0 ? (
+            <div className="rounded-xl border border-gray-200 bg-white p-4 sm:p-5 shadow-sm">
+              <p className="text-gray-800 font-medium text-sm sm:text-base">現在募集している事業はありません。</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              {recruits
+                .slice()
+                .sort((a, b) => (a.deadline < b.deadline ? -1 : a.deadline > b.deadline ? 1 : 0))
+                .map((r) => (
+                  <article key={r.id} className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+                    {r.imageUrl ? (
+                      <div className="relative h-40 sm:h-48">
+                        {/* 外部画像を使う場合は next.config に remotePatterns を追加してください */}
+                        <Image src={r.imageUrl} alt={r.title} fill className="object-cover" />
+                      </div>
+                    ) : null}
+                    <div className="p-4 sm:p-5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-700 border border-rose-200">
+                          締切：{r.deadline}
+                        </span>
+                        <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2 py-0.5 text-xs font-semibold text-sky-700 border border-sky-200">
+                          実施：{r.date}
+                        </span>
+                        <span className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-700 border border-slate-200">
+                          {r.area}
+                        </span>
+                      </div>
+                      <h3 className="mt-2 text-base sm:text-lg font-bold text-gray-900">{r.title}</h3>
+                      {r.url && (
+                        <div className="mt-2 text-sm">
+                          <a
+                            className="text-blue-700 underline underline-offset-2 hover:no-underline"
+                            href={r.url}
+                            target={r.url.startsWith("http") ? "_blank" : undefined}
+                            rel={r.url.startsWith("http") ? "noopener noreferrer" : undefined}
+                          >
+                            {r.urlDesc?.trim() ? r.urlDesc : "開催要項・詳細"}
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  </article>
+                ))}
+            </div>
+          )}
 
-          {/* 下に画像（モバイルで最適化） */}
-          <div className="mt-6 flex justify-center">
-            <Image
-              src="/images/sample.png"
-              alt="募集案内イメージ"
-              width={720}
-              height={420}
-              sizes="(max-width: 640px) 92vw, (max-width: 1024px) 80vw, 720px"
-              className="rounded-xl shadow-lg object-cover select-none w-full max-w-[720px] h-auto"
-              draggable={false}
-            />
-          </div>
+          {/* 任意：更新時刻（必要なら表示） */}
+          {recruits && (
+            <div className="mt-4 text-[12px] sm:text-xs text-gray-500">募集情報 最終更新：{recruitsUpdated}</div>
+          )}
         </div>
       </section>
 
       {/* 年間スケジュール */}
       <section className="w-full bg-white pb-10 sm:pb-12 md:pb-14 px-4 sm:px-6 md:px-10 lg:px-16">
         <div className="mx-auto max-w-6xl">
-          <h2
-            className="text-gray-800 font-extrabold tracking-tight leading-tight"
-            style={{ fontSize: "clamp(20px, 4.4vw, 30px)" }}
-          >
+          <h2 className="text-gray-800 font-extrabold tracking-tight leading-tight" style={{ fontSize: "clamp(20px, 4.4vw, 30px)" }}>
             年間スケジュール
           </h2>
           <div className="mt-2 h-[2px] w-16 bg-red-600 rounded-full" />
 
-          {/* 12か月グリッド */}
-          <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
-            {Array.from({ length: 12 }).map((_, i) => (
-              <MonthCard key={i} monthIndex={i} items={byMonth[i] ?? []} />
-            ))}
-          </div>
-        </div>
-
-        {/* 最終更新日時 */}
-        <div className="mx-auto max-w-6xl mt-6 text-[13px] sm:text-sm text-gray-600">
-          最終更新日時：{lastUpdated}
-          <div className="mt-2 text-[12px] sm:text-xs text-gray-500 space-y-1">
-            <p>※愛知のRSが参加できそうな事業を記載しています。</p>
-            <p>※やむを得ない理由により、日程の変更・事業の中止となる場合があります。</p>
-          </div>
+          {events === null ? (
+            <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="h-40 rounded-2xl border border-gray-200 bg-gray-50 animate-pulse" />
+              ))}
+            </div>
+          ) : (
+            <>
+              <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+                {Array.from({ length: 12 }).map((_, i) => (
+                  <MonthCard key={i} monthIndex={i} items={byMonth[i] ?? []} />
+                ))}
+              </div>
+              <div className="mt-6 text-[13px] sm:text-sm text-gray-600">
+                最終更新日時：{lastUpdated}
+                <div className="mt-2 text-[12px] sm:text-xs text-gray-500 space-y-1">
+                  <p>※愛知のRSが参加できそうな事業を記載しています。</p>
+                  <p>※やむを得ない理由により、日程の変更・事業の中止となる場合があります。</p>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </section>
 

@@ -78,7 +78,37 @@ model MeetingReport {
   @@unique([fiscalYear, round], name: "fiscalYear_round")
 }
 
+model CalendarEvent {
+  id         String   @id @default(cuid())
+  date       DateTime // JSTの 00:00 を推奨（下記APIでJST→UTC変換）
+  title      String
+  url        String?
+  note       String?
+  area       String?
+  isPublished Boolean  @default(true)
 
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([date, isPublished])
+}
+
+model Recruiting {
+  id          String   @id @default(cuid())
+  title       String
+  date        DateTime        // 実施日（JST 00:00 保存）
+  deadline    DateTime        // 参加期限（JST 00:00 保存）
+  area        String
+  url         String?
+  urlDesc     String?
+  imageUrl    String?
+  isPublished Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([deadline, isPublished])
+  @@index([date])
+}
 
 model User {
   id           Int      @id @default(autoincrement())
