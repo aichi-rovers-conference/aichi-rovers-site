@@ -23,20 +23,40 @@ export default function RegisterParticipantPage() {
   const [troop, setTroop] = useState("");
   const [rsAge, setRsAge] = useState("");
   const [district, setDistrict] = useState("");
+  const [email, setEmail] = useState("");
   const [msg, setMsg] = useState("");
 
   // 一括登録
   const [bulk, setBulk] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const isValidEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+
   async function addOne() {
-    if (!name.trim() || !troop.trim() || rsAge.trim() === "" || !district) {
+    const nm = name.trim();
+    const tr = troop.trim();
+    const ageStr = rsAge.trim();
+    const em = email.trim();
+
+    if (!nm || !tr || ageStr === "" || !district) {
       setMsg("未入力の項目があります");
       return;
     }
+    if (em && !isValidEmail(em)) {
+      setMsg("メールアドレスの形式が正しくありません");
+      return;
+    }
+
     setBusy(true);
     try {
-      const body = { name: name.trim(), troop: troop.trim(), rsAge: Number(rsAge), district };
+      const body: any = {
+        name: nm,
+        troop: tr,
+        rsAge: Number(ageStr),
+        district,
+      };
+      if (em) body.email = em; // 任意
+
       const res = await fetch("/api/participants", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -46,7 +66,7 @@ export default function RegisterParticipantPage() {
         const err = await safeJson(res);
         throw new Error(err?.error ?? (await res.text()) ?? "登録に失敗しました");
       }
-      setName(""); setTroop(""); setRsAge(""); setDistrict("");
+      setName(""); setTroop(""); setRsAge(""); setDistrict(""); setEmail("");
       setMsg("1名追加しました");
     } catch (e: any) {
       setMsg(e?.message || "登録に失敗しました");
@@ -63,6 +83,7 @@ export default function RegisterParticipantPage() {
       let res = await fetch("/api/participants/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        // 5列目にメール（任意）を付けられます：氏名, 所属団, RS年齢, 地区[, メール]
         body: JSON.stringify({ text: bulk }),
       });
       if (res.status === 404) {
@@ -114,6 +135,15 @@ export default function RegisterParticipantPage() {
             onChange={(e) => setRsAge(e.target.value)}
             className="h-11 rounded-xl border border-gray-300 px-3 bg-white focus:outline-none focus:ring-4 focus:ring-red-100 focus:border-red-500 transition"
           />
+          <input
+            type="email"
+            inputMode="email"
+            autoComplete="email"
+            placeholder="メールアドレス（任意）"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="h-11 rounded-xl border border-gray-300 px-3 bg-white focus:outline-none focus:ring-4 focus:ring-red-100 focus:border-red-500 transition"
+          />
           <select
             value={district}
             onChange={(e) => setDistrict(e.target.value)}
@@ -134,6 +164,7 @@ export default function RegisterParticipantPage() {
           >
             追加する
           </motion.button>
+          {msg && <div className="text-sm text-gray-600">{msg}</div>}
         </div>
       </motion.div>
 
@@ -145,13 +176,17 @@ export default function RegisterParticipantPage() {
       >
         <div className="flex items-center gap-2">
           <Upload className="text-red-700" />
-          <h2 className="text-lg font-bold">一括登録（1行: 「氏名, 所属団, RS年齢, 地区」）</h2>
+          <h2 className="text-lg font-bold">一括登録（1行: 「氏名, 所属団, RS年齢, 地区[, メール]」）</h2>
         </div>
         <textarea
           rows={8}
           value={bulk}
           onChange={(e) => setBulk(e.target.value)}
-          placeholder={"例)\n山田太郎, 名古屋◯◯団, 2, 名古屋北斗地区\n佐藤花子, 尾張◯◯団, 1, 尾張西地区"}
+          placeholder={
+`例)
+山田太郎, 名古屋◯◯団, 2, 名古屋北斗地区, taro@example.com
+佐藤花子, 尾張◯◯団, 1, 尾張西地区`
+          }
           className="mt-4 w-full rounded-xl border border-gray-300 p-3 font-mono text-sm bg-white focus:outline-none focus:ring-4 focus:ring-red-100 focus:border-red-500 transition"
         />
         <div className="mt-3 flex items-center gap-8">
