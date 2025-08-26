@@ -1,5 +1,5 @@
 // app/api/calendar/events/[id]/route.ts
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import prisma from "@/lib/prisma";
 import { verifyToken, COOKIE_NAME } from "@/lib/auth";
@@ -23,7 +23,7 @@ function jstDateOnly(s: string): Date {
 }
 
 export async function PATCH(
-  req: NextRequest,
+  req: Request,
   { params }: { params: { id: string } }
 ) {
   const me = await requireEditor();
@@ -49,7 +49,7 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  _req: Request,
   { params }: { params: { id: string } }
 ) {
   const me = await requireEditor();

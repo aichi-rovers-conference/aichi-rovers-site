@@ -1,5 +1,5 @@
 // app/api/calendar/recruitings/[id]/route.ts
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import prisma from "@/lib/prisma";
 import { verifyToken, COOKIE_NAME } from "@/lib/auth";
@@ -30,7 +30,10 @@ function jstDateOnly(s: string): Date {
   return new Date(`${t}T00:00:00+09:00`);
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(
+  req: Request,
+  { params }: { params: { id: string } }
+) {
   const me = await requireEditor();
   if (!me) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
@@ -55,7 +58,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
 }
 
-export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(
+  _req: Request,
+  { params }: { params: { id: string } }
+) {
   const me = await requireEditor();
   if (!me) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
