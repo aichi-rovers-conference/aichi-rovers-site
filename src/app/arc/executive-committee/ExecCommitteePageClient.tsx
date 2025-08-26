@@ -4,8 +4,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { motion, useScroll, useTransform } from "framer-motion";
-import { FaFacebook, FaInstagram, FaXTwitter, FaLine } from "react-icons/fa6";
 import ArcHeader1 from "@/src/components/ArcHeader1";
+import ArcFooter from "@/src/components/ArcFooter";
 
 /* ===== 初心者でも編集しやすい外部JSON =====
    /public/excom/members.json に配列で置くだけ
@@ -226,61 +226,7 @@ export default function ExecCommitteePage() {
       <div className="mx-auto mb-10 mt-6 max-w-6xl px-4 sm:px-6 md:px-10 lg:px-16">
         <div className="border-t border-gray-300" />
       </div>
-
-      {/* SNS（モバイルで押しやすく） */}
-      <section className="bg-gray-100 py-6">
-        <div className="mx-auto flex max-w-6xl justify-center gap-6 sm:gap-8">
-          <motion.a
-            href="https://www.facebook.com/aichirovers/?locale=ja_JP"
-            target="_blank"
-            rel="noopener noreferrer"
-            whileHover={{ y: -3, scale: 1.05 }}
-            whileTap={{ scale: 0.96 }}
-            transition={{ type: "spring", stiffness: 320, damping: 22 }}
-            className="text-blue-500 hover:text-blue-400"
-            aria-label="Facebook"
-          >
-            <FaFacebook size={26} className="sm:size-[28px]" />
-          </motion.a>
-          <span className="cursor-not-allowed text-pink-500 opacity-40" aria-disabled="true" aria-label="Instagram（未開設）">
-            <FaInstagram size={28} className="sm:size-[32px]" />
-          </span>
-          <span className="cursor-not-allowed text-black opacity-40" aria-disabled="true" aria-label="X（未開設）">
-            <FaXTwitter size={28} className="sm:size-[32px]" />
-          </span>
-          <motion.a
-            href="https://lin.ee/BPXqTTv"
-            target="_blank"
-            rel="noopener noreferrer"
-            whileHover={{ y: -3, scale: 1.05 }}
-            whileTap={{ scale: 0.96 }}
-            transition={{ type: "spring", stiffness: 320, damping: 22 }}
-            className="text-green-600 hover:text-green-500"
-            aria-label="LINE"
-          >
-            <FaLine size={28} className="sm:size-[32px]" />
-          </motion.a>
-        </div>
-      </section>
-
-      {/* フッター */}
-      <footer className="mt-10 bg-gray-900 py-8 text-white">
-        <div className="mx-auto max-w-6xl px-4 text-center sm:px-6 md:px-10 lg:px-16">
-          <p className="mb-2 font-semibold" style={{ fontSize: "clamp(14px, 3.6vw, 18px)" }}>
-            お問い合わせ
-          </p>
-          <a
-            href="mailto:aichi.rovers.conference@gmail.com"
-            className="text-red-400 transition-colors hover:text-red-300"
-            style={{ fontSize: "clamp(13px, 3.4vw, 16px)" }}
-          >
-            aichi.rovers.conference@gmail.com
-          </a>
-          <p className="mt-4 text-gray-400" style={{ fontSize: "clamp(11px, 3vw, 14px)" }}>
-            &copy; {new Date().getFullYear()} Aichi Rovers Conference. All rights reserved.
-          </p>
-        </div>
-      </footer>
+      <ArcFooter />
     </div>
   );
 }
