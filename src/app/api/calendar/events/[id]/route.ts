@@ -1,4 +1,3 @@
-// app/api/calendar/events/[id]/route.ts
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import prisma from "@/lib/prisma";
@@ -24,12 +23,12 @@ function jstDateOnly(s: string): Date {
 
 export async function PATCH(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const me = await requireEditor();
   if (!me) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const id = params.id;
+  const { id } = await params;
   const b = await req.json().catch(() => ({} as any));
 
   const data: any = {};
@@ -50,12 +49,13 @@ export async function PATCH(
 
 export async function DELETE(
   _req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const me = await requireEditor();
   if (!me) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const id = params.id;
+  const { id } = await params;
+
   try {
     await prisma.calendarEvent.delete({ where: { id } });
     return NextResponse.json({ ok: true });
