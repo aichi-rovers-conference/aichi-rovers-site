@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 };
 
 export const dynamic = "force-static"; // 変更頻度が低いため静的配信
-export const revalidate = 60 * 60 * 24; // 1日毎に再検証（任意）
+export const revalidate = 86400; // 1日毎に再検証（任意）
 
 const ORG_NAME = "Aichi Rovers Conference（愛知連盟ローバース会議）";
 const CONTACT_EMAIL = "info@aichirovers.com"; // ←必要に応じて変更
