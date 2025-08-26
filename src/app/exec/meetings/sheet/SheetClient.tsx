@@ -502,21 +502,40 @@ function DetailSheet({
 
   const toggleAttend = async (i: number, m: MeetingLabel) => {
     if (!editEnabled) return;
-    const before = rows[i].attendance[m];
+    const before = !!rows[i].attendance[m];
+    const after = !before;
+
     setPeople(prev => {
       const copy = clone(prev);
-      copy[detailRegion][i].attendance[m] = !before;
+      copy[detailRegion][i].attendance[m] = after;
       return copy;
     });
     bumpAutoLock();
     try {
-      const res = await fetch("/api/meetings/attendance", {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ participantId: rows[i].id, meetingCode: m, present: !before, via: "sheet" }),
-      });
-      if (!res.ok) throw new Error("save failed");
-    } catch {
+      const url = "/api/meetings/attendance";
+      const res = before
+        ? await fetch(
+          `${url}?participantId=${encodeURIComponent(rows[i].id)}&meeting=${encodeURIComponent(m)}`,
+          { method: "DELETE", cache: "no-store" }
+        )
+
+        : await fetch(url, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({
+            participantId: rows[i].id,
+            meeting: m, 
+            present: after,
+            via: "sheet",
+          }),
+        });
+
+      if (!res.ok) {
+        const msg = await res.text().catch(() => "");
+        throw new Error(msg || `save failed (${res.status})`);
+      }
+    } catch (e) {
       setPeople(prev => {
         const copy = clone(prev);
         copy[detailRegion][i].attendance[m] = before;

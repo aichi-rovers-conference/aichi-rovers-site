@@ -1,7 +1,6 @@
-// app/api/participants/route.ts
+// app/api/meetings/attendance/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "../../../../../lib/prisma";
-import { District, Prisma } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -9,134 +8,107 @@ export const revalidate = 0;
 function bad(message = "Bad Request", status = 400) {
   return NextResponse.json({ ok: false, error: "BAD_REQUEST", message }, { status });
 }
-function errJson(e: any) {
+function errJson(e: any, status = 500) {
   return NextResponse.json(
     { ok: false, error: e?.code || "SERVER_ERROR", message: e?.message || String(e) },
-    { status: 500 }
+    { status }
   );
 }
 
-/* District 日本語⇔Enum マップ（必要ならGETの返却で使う） */
-const LABEL_BY_ENUM: Record<District, string> = {
-  [District.NAGOYA_CHIKUSA]: "名古屋千種地区",
-  [District.NAGOYA_SEIBU]:   "名古屋西部地区",
-  [District.NAGOYA_HOKUTO]:  "名古屋北斗地区",
-  [District.NAGOYA_TATSUMI]: "名古屋巽地区",
-  [District.OWARI_NISHI]:    "尾張西地区",
-  [District.OWARI_HIGASHI]:  "尾張東地区",
-  [District.OWARI_MINAMI]:   "尾張南地区",
-  [District.CHITA_HOKUBU]:   "知多北部地区",
-  [District.CHITA_HIGASHI]:  "知多東地区",
-  [District.CHITA_SEINAN]:   "知多西南地区",
-  [District.TOYOTA]:         "豊田地区",
-  [District.MIKAWA_AOI]:     "三河葵地区",
-  [District.HEKIKAI]:        "碧海地区",
-  [District.HONOKUNI]:       "穂の国地区",
-  [District.OTHERS]:         "その他地区",
-};
-const ENUM_BY_LABEL: Record<string, District> = Object.fromEntries(
-  Object.entries(LABEL_BY_ENUM).map(([e, label]) => [label, e as District])
-) as Record<string, District>;
-
-function parseDistrictParam(input?: string | null): District | undefined {
-  if (!input) return undefined;
-  if ((Object.keys(LABEL_BY_ENUM) as string[]).includes(input)) return input as District; // Enum文字列
-  return ENUM_BY_LABEL[input]; // 日本語ラベル
+// "R7-2" / "R7-02" 両対応で正規化
+function normalizeMeetingCode(raw: string) {
+  const s = String(raw || "").trim().toUpperCase();
+  const m = /^R(\d+)-(\d+)$/.exec(s);
+  if (!m) return null;
+  const reiwa = Number(m[1]);
+  const seq = Number(m[2]);
+  if (!Number.isFinite(reiwa) || !Number.isFinite(seq)) return null;
+  const codePadded = `R${reiwa}-${String(seq).padStart(2, "0")}`;
+  return { reiwa, seq, codeRaw: s, codePadded };
 }
 
-/* ========== GET ========== */
-// /api/participants?district=...&q=...&limit=50&hasEmail=true
-export async function GET(req: Request) {
+async function findMeetingByCode(raw: string) {
+  const n = normalizeMeetingCode(raw);
+  if (!n) return null;
+  // ゼロ埋め優先、見つからなければ raw も試す（既存データが R7-2 で入っている可能性のケア）
+  const codes = [n.codePadded, n.codeRaw].filter((v, i, a) => a.indexOf(v) === i);
+  return prisma.meeting.findFirst({ where: { code: { in: codes } } });
+}
+
+/** POST: 出欠の付け外し（present: true/false） */
+export async function POST(req: Request) {
   try {
-    const { searchParams } = new URL(req.url);
-    const districtParam = (searchParams.get("district") || "").trim();
-    const q = (searchParams.get("q") || "").trim();
-    const hasEmail = (searchParams.get("hasEmail") || "").toLowerCase() === "true";
+    const body = await req.json().catch(() => ({}));
+    const participantId = String(body?.participantId ?? "").trim();
+    const meetingInput = String(body?.meeting ?? body?.meetingCode ?? "").trim();
+    const present = Boolean(body?.present);
+    const via = String(body?.via ?? "api");
 
-    const limitRaw = Number(searchParams.get("limit") || 50);
-    const limit = Math.max(1, Math.min(200, Number.isFinite(limitRaw) ? limitRaw : 50));
+    if (!participantId) return bad("participantId is required");
+    if (!meetingInput) return bad("meeting (e.g. R7-2) is required");
 
-    const district = parseDistrictParam(districtParam);
-
-    const where: Prisma.ParticipantWhereInput = {};
-    if (district) where.district = district;
-    if (q) {
-      // ※ あなたの Client に `mode: "insensitive"` が無いので通常の contains のみ
-      where.OR = [
-        { name:  { contains: q } },
-        { troop: { contains: q } },
-        { email: { contains: q } },
-      ];
-    }
-    if (hasEmail) where.email = { not: null };
-
-    const items = await prisma.participant.findMany({
-      where,
-      orderBy: [{ name: "asc" }],
-      take: limit,
-      select: {
-        id: true,
-        name: true,
-        troop: true,
-        district: true,
-        rsAge: true,
-        email: true,
-        // createdAt/updatedAt はスキーマに無いなら選ばない
-      },
+    // 参加者の存在確認
+    const p = await prisma.participant.findUnique({
+      where: { id: participantId },
+      select: { id: true },
     });
-
-    return NextResponse.json(
-      { ok: true, items },
-      { headers: { "Cache-Control": "no-store, must-revalidate" } }
+    if (!p) return NextResponse.json(
+      { ok: false, error: "NOT_FOUND", message: "participant not found" },
+      { status: 404 }
     );
-  } catch (e: any) {
+
+    // Meeting をコードで取得
+    const meeting = await findMeetingByCode(meetingInput);
+    if (!meeting) {
+      return NextResponse.json(
+        { ok: false, error: "NOT_FOUND", message: "meeting not found (code mismatch?). Use R7-02 style." },
+        { status: 404 }
+      );
+    }
+
+    if (present) {
+      // 出席を付ける（存在しなければ作成、あれば更新）
+      const attendance = await prisma.attendance.upsert({
+        where: { meetingId_participantId: { meetingId: meeting.id, participantId } },
+        update: { checkedAt: new Date(), via },
+        create: { meetingId: meeting.id, participantId, via },
+      });
+      return NextResponse.json({ ok: true, attendance });
+    } else {
+      // 出席を外す（冪等）
+      await prisma.attendance.deleteMany({
+        where: { meetingId: meeting.id, participantId },
+      });
+      return NextResponse.json({ ok: true, deleted: true });
+    }
+  } catch (e) {
     return errJson(e);
   }
 }
 
-/* ========== POST ========== */
-// { name, troop, rsAge, district, email? }  ※district は Enum でも日本語でもOK
-export async function POST(req: Request) {
+/** DELETE: 直接削除（外す）
+ * /api/meetings/attendance?participantId=...&meeting=R7-2
+ */
+export async function DELETE(req: Request) {
   try {
-    const body = await req.json().catch(() => ({}));
-    const name = String(body?.name ?? "").trim();
-    const troop = String(body?.troop ?? "").trim();
-    const rsAgeNum = Number(body?.rsAge);
-    const districtInput = String(body?.district ?? "").trim();
-    const emailRaw = body?.email == null ? null : (String(body.email).trim() || null);
+    const { searchParams } = new URL(req.url);
+    const participantId = String(searchParams.get("participantId") ?? "").trim();
+    const meetingInput = String(searchParams.get("meeting") ?? searchParams.get("meetingCode") ?? "").trim();
 
-    if (!name) return bad("name is required");
-    if (!troop) return bad("troop is required");
-    if (!Number.isFinite(rsAgeNum)) return bad("rsAge must be a number");
+    if (!participantId) return bad("participantId is required");
+    if (!meetingInput) return bad("meeting (e.g. R7-2) is required");
 
-    const district = parseDistrictParam(districtInput);
-    if (!district) return bad("invalid district");
-
-    if (emailRaw && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailRaw)) {
-      return bad("invalid email");
-    }
-
-    const participant = await prisma.participant.create({
-      data: {
-        name,
-        troop,
-        rsAge: Math.max(0, Math.floor(rsAgeNum)),
-        district,
-        email: emailRaw,
-      },
-    });
-
-    return NextResponse.json(
-      { ok: true, item: participant, participant },
-      { status: 201, headers: { "Cache-Control": "no-store, must-revalidate" } }
-    );
-  } catch (e: any) {
-    if (e?.code === "P2002") {
+    const meeting = await findMeetingByCode(meetingInput);
+    if (!meeting) {
       return NextResponse.json(
-        { ok: false, error: "DUPLICATE", message: "email is already registered" },
-        { status: 409 }
+        { ok: false, error: "NOT_FOUND", message: "meeting not found (code mismatch?). Use R7-02 style." },
+        { status: 404 }
       );
     }
+
+    await prisma.attendance.deleteMany({ where: { meetingId: meeting.id, participantId } });
+    return NextResponse.json({ ok: true, deleted: true });
+  } catch (e) {
     return errJson(e);
   }
 }
