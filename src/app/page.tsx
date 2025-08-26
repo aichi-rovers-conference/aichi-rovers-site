@@ -8,6 +8,7 @@ import { motion, useScroll, useTransform } from "framer-motion";
 import { FaFacebook, FaInstagram, FaXTwitter, FaLine } from "react-icons/fa6";
 import ExecAccessButton from "../components/ExecAccessButton";
 import ArcHeader1 from "../components/ArcHeader1";
+import ArcFooter from "../components/ArcFooter";
 
 export default function Home() {
   // ※ ヘッダーでの open 状態を使わないなら削ってOK
@@ -244,60 +245,8 @@ export default function Home() {
         </div>
       </section>
 
-      {/* SNSリンク：アイコンサイズをモバイル抑えめ */}
-      <section className="bg-gray-100 py-6">
-        <div className="mx-auto max-w-6xl flex justify-center gap-6 sm:gap-8">
-          <motion.a
-            href="https://www.facebook.com/aichirovers/?locale=ja_JP"
-            target="_blank"
-            rel="noopener noreferrer"
-            whileHover={{ y: -3, scale: 1.05 }}
-            whileTap={{ scale: 0.96 }}
-            transition={{ type: "spring", stiffness: 320, damping: 22 }}
-            className="text-blue-500 hover:text-blue-400"
-            aria-label="Facebook"
-          >
-            <FaFacebook size={26} className="sm:size-[28px]" />
-          </motion.a>
-
-          <span className="text-pink-500 opacity-40 cursor-not-allowed" aria-disabled="true" aria-label="Instagram（未開設）">
-            <FaInstagram size={28} className="sm:size-[32px]" />
-          </span>
-
-          <span className="text-black opacity-40 cursor-not-allowed" aria-disabled="true" aria-label="X（未開設）">
-            <FaXTwitter size={28} className="sm:size-[32px]" />
-          </span>
-
-          <motion.a
-            href="https://lin.ee/BPXqTTv"
-            target="_blank"
-            rel="noopener noreferrer"
-            whileHover={{ y: -3, scale: 1.05 }}
-            whileTap={{ scale: 0.96 }}
-            transition={{ type: "spring", stiffness: 320, damping: 22 }}
-            className="text-green-600 hover:text-green-500"
-            aria-label="LINE"
-          >
-            <FaLine size={28} className="sm:size-[32px]" />
-          </motion.a>
-        </div>
-      </section>
-
-      {/* フッター：文字サイズを段階調整 */}
-      <footer className="bg-gray-900 text-white py-8 mt-10">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 md:px-10 lg:px-16 text-center">
-          <p className="text-base sm:text-lg font-semibold mb-2">お問い合わせ</p>
-          <a
-            href="mailto:aichi.rovers.conference@gmail.com"
-            className="text-red-400 hover:text-red-300 transition-colors"
-          >
-            aichi.rovers.conference@gmail.com
-          </a>
-          <p className="mt-4 text-xs sm:text-sm text-gray-400">
-            &copy; {new Date().getFullYear()} Aichi Rovers Conference. All rights reserved.
-          </p>
-        </div>
-      </footer>
+    <ArcFooter />
+      
     </div>
   );
 }
