@@ -1,137 +1,143 @@
 // app/api/admin/users/[id]/route.ts
-
-export const runtime = "nodejs";
-
-
-import { NextRequest, NextResponse } from "next/server";
-import bcrypt from "bcryptjs";
-// ※ パスはあなたのプロジェクトに合わせて調整してください
-import { prisma } from "../../../../../../lib/prisma";
+import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { jwtVerify } from "jose";
-import type { Role } from "@prisma/client";
+import { verifyToken, COOKIE_NAME } from "@/lib/auth";
+import prisma from "@/lib/prisma";
+import bcrypt from "bcryptjs";
+import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+export const runtime = "nodejs";
 
-const COOKIE_NAME = "arc_session";
-const SECRET = new TextEncoder().encode(process.env.AUTH_SECRET || "dev-secret");
+type Role = "ADMIN" | "EDITOR" | "VIEWER";
 const ROLES: Role[] = ["ADMIN", "EDITOR", "VIEWER"];
 
-async function getMe() {
+async function getSession() {
   const jar = await cookies();
-  const token = jar.get(COOKIE_NAME)?.value;
-  if (!token) return null;
-  try {
-    const { payload } = await jwtVerify(token, SECRET);
-    const id = Number(payload?.id);
-    if (!Number.isFinite(id)) return null;
-    return prisma.user.findUnique({
-      where: { id },
-      select: { id: true, username: true, role: true, isSuper: true, isActive: true },
-    });
-  } catch {
-    return null;
-  }
+  const token = jar.get(COOKIE_NAME)?.value ?? "";
+  return token ? await verifyToken(token) : null;
 }
 
-function genTempPassword(len = 14) {
-  const s = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*()-_=+";
-  return Array.from({ length: len }, () => s[Math.floor(Math.random() * s.length)]).join("");
-}
-
-/** PATCH: 有効/無効、ロール、パスワードの更新（SUPER限定） */
-export async function PATCH(
-  req: NextRequest,
-  ctx: { params: Promise<{ id: string }> } // ← params は Promise
-) {
-  const me = await getMe();
-  if (!me) return new NextResponse("Unauthorized", { status: 401 });
-  if (!me.isSuper) return new NextResponse("Forbidden", { status: 403 });
-
-  // ★ params を await → 数値化
-  const { id: idParam } = await ctx.params;
-  const id = Number(idParam);
-  if (!Number.isFinite(id)) return new NextResponse("Bad Request", { status: 400 });
-
-  const body = (await req.json().catch(() => ({}))) as {
-    isActive?: boolean;
-    role?: string | Role;
-    resetPassword?: boolean;
-    newPassword?: string;
+function sanitizeUser(u: any) {
+  return {
+    id: u.id,
+    username: u.username,
+    role: u.role as Role,
+    isActive: !!u.isActive,
+    isSuper: !!u.isSuper,
+    createdAt: u.createdAt,
+    updatedAt: u.updatedAt,
   };
+}
 
-  const target = await prisma.user.findUnique({
-    where: { id },
-    select: { id: true, username: true, role: true, isActive: true },
-  });
-  if (!target) return new NextResponse("Not Found", { status: 404 });
+function randomPassword(len = 14) {
+  return crypto.randomBytes(24).toString("base64url").slice(0, len);
+}
 
-  // 自分自身の無効化/ロール変更は禁止
-  if (me.id === id) {
-    if (body.isActive === false) {
-      return new NextResponse("You cannot deactivate yourself", { status: 400 });
-    }
-    if (body.role && body.role !== target.role) {
-      return new NextResponse("You cannot change your own role", { status: 400 });
-    }
-  }
+async function hashPassword(plain: string) {
+  return await bcrypt.hash(plain, 10);
+}
 
+/** PATCH /api/admin/users/:id
+ *  - role: "ADMIN" | "EDITOR" | "VIEWER"        → SUPERのみ
+ *  - isActive: boolean                           → SUPERのみ
+ *  - resetPassword: true                         → SUPERのみ（ランダム再発行）
+ *  - newPassword: string (8〜128)                → SUPERのみ（※必要なら self-change も可）
+ */
+export async function PATCH(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const s = await getSession();
+  if (!s) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { id } = await params;
+  const uid = Number(id);
+  if (!Number.isFinite(uid)) return NextResponse.json({ error: "Bad Request" }, { status: 400 });
+
+  const body = await req.json().catch(() => ({} as any));
+  const patch: any = {};
   let tempPassword: string | undefined;
 
-  // パスワードリセット（仮パス生成）
-  if (body.resetPassword) {
-    tempPassword = genTempPassword();
-    const passwordHash = await bcrypt.hash(tempPassword, 10);
-    await prisma.user.update({ where: { id }, data: { passwordHash } });
+  // --- 権限チェックとパッチ組み立て ---
+  if ("role" in body) {
+    if (!s.isSuper) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const role = String(body.role ?? "").toUpperCase() as Role;
+    if (!ROLES.includes(role)) return NextResponse.json({ error: "role が不正です" }, { status: 400 });
+    patch.role = role;
   }
 
-  // パスワード変更（任意文字列）
-  if (typeof body.newPassword === "string") {
-    const pwd = body.newPassword.trim();
-    if (pwd.length < 8 || pwd.length > 128) {
-      return new NextResponse("Password length must be 8-128", { status: 400 });
+  if ("isActive" in body) {
+    if (!s.isSuper) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    patch.isActive = !!body.isActive;
+  }
+
+  if (body?.resetPassword) {
+    if (!s.isSuper) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    tempPassword = randomPassword(14);
+    patch.passwordHash = await hashPassword(tempPassword);
+  }
+
+  if (typeof body?.newPassword === "string") {
+    if (!s.isSuper) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const npw = body.newPassword.trim();
+    if (npw.length < 8 || npw.length > 128) {
+      return NextResponse.json({ error: "newPassword は 8〜128 文字で指定してください" }, { status: 400 });
     }
-    const passwordHash = await bcrypt.hash(pwd, 10);
-    await prisma.user.update({ where: { id }, data: { passwordHash } });
+    patch.passwordHash = await hashPassword(npw);
   }
 
-  // ロール更新
-  if (typeof body.role === "string") {
-    const nextRole = body.role.toUpperCase() as Role;
-    if (!ROLES.includes(nextRole)) {
-      return new NextResponse("Invalid role", { status: 400 });
-    }
-    await prisma.user.update({ where: { id }, data: { role: nextRole } });
+  if (Object.keys(patch).length === 0) {
+    return NextResponse.json({ error: "変更項目がありません" }, { status: 400 });
   }
 
-  // 有効/無効
-  if (typeof body.isActive === "boolean") {
-    await prisma.user.update({ where: { id }, data: { isActive: body.isActive } });
+  // 自分自身を削除・無効化・降格等する場合の安全策が必要ならここで追加（任意）
+
+  try {
+    const user = await prisma.user.update({
+      where: { id: uid },
+      data: patch,
+      select: {
+        id: true,
+        username: true,
+        role: true,
+        isActive: true,
+        isSuper: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+    return NextResponse.json({ user: sanitizeUser(user), tempPassword });
+  } catch (e: any) {
+    const msg = e?.code === "P2025" ? "対象のユーザーが見つかりません" : e?.message || "更新に失敗しました";
+    return NextResponse.json({ error: msg }, { status: 400 });
   }
-
-  const user = await prisma.user.findUnique({
-    where: { id },
-    select: { id: true, username: true, role: true, isActive: true, createdAt: true, updatedAt: true },
-  });
-
-  return NextResponse.json({ user, ...(tempPassword ? { tempPassword } : {}) });
 }
 
-/** DELETE: ユーザー削除（SUPER限定・自分は削除不可） */
+/** DELETE /api/admin/users/:id  : SUPERのみ */
 export async function DELETE(
-  _req: NextRequest,
-  ctx: { params: Promise<{ id: string }> } // ← こちらも Promise
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const me = await getMe();
-  if (!me) return new NextResponse("Unauthorized", { status: 401 });
-  if (!me.isSuper) return new NextResponse("Forbidden", { status: 403 });
+  const s = await getSession();
+  if (!s) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!s.isSuper) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const { id: idParam } = await ctx.params; // ★ await
-  const id = Number(idParam);
-  if (!Number.isFinite(id)) return new NextResponse("Bad Request", { status: 400 });
-  if (me.id === id) return new NextResponse("You cannot delete yourself", { status: 400 });
+  const { id } = await params;
+  const uid = Number(id);
+  if (!Number.isFinite(uid)) return NextResponse.json({ error: "Bad Request" }, { status: 400 });
 
-  await prisma.user.delete({ where: { id } });
-  return NextResponse.json({ ok: true });
+  // 自分自身の削除禁止など入れるならここで
+  if (s.id === uid) {
+    return NextResponse.json({ error: "自分自身は削除できません" }, { status: 400 });
+  }
+
+  try {
+    await prisma.user.delete({ where: { id: uid } });
+    return NextResponse.json({ ok: true });
+  } catch (e: any) {
+    const msg = e?.code === "P2025" ? "対象のユーザーが見つかりません" : e?.message || "削除に失敗しました";
+    return NextResponse.json({ error: msg }, { status: 400 });
+  }
 }

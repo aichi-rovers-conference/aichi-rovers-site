@@ -1,98 +1,114 @@
 // app/api/admin/users/route.ts
-import { NextRequest, NextResponse } from "next/server";
-import bcrypt from "bcryptjs";
-import { prisma } from "../../../../../lib/prisma";
+import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import type { Role as PrismaRole, Prisma } from "@prisma/client";
-import { COOKIE_NAME, verifyToken } from "@/lib/auth";
+import { verifyToken, COOKIE_NAME } from "@/lib/auth";
+import prisma from "@/lib/prisma";
+import bcrypt from "bcryptjs";
+import crypto from "crypto";
 
-export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+export const runtime = "nodejs";
 
 type Role = "ADMIN" | "EDITOR" | "VIEWER";
 const ROLES: Role[] = ["ADMIN", "EDITOR", "VIEWER"];
 
-function jsonNoStore(body: any, status = 200) {
-  const res = NextResponse.json(body, { status });
-  res.headers.set("Cache-Control", "no-store, must-revalidate");
-  return res;
-}
-
-async function getMe() {
+async function getSession() {
   const jar = await cookies();
-  const token = jar.get(COOKIE_NAME)?.value;
-  if (!token) return null;
+  const token = jar.get(COOKIE_NAME)?.value ?? "";
+  return token ? await verifyToken(token) : null;
+}
 
-  try {
-    const payload = await verifyToken(token); // ★ iss/aud つきで厳密検証
-    const id = Number((payload as any)?.id);
-    if (!Number.isFinite(id)) return null;
+function sanitizeUser(u: any) {
+  return {
+    id: u.id,
+    username: u.username,
+    role: u.role as Role,
+    isActive: !!u.isActive,
+    isSuper: !!u.isSuper,
+    createdAt: u.createdAt,
+    updatedAt: u.updatedAt,
+  };
+}
 
-    return prisma.user.findUnique({
-      where: { id },
-      select: { id: true, username: true, role: true, isSuper: true, isActive: true },
-    });
-  } catch {
-    return null;
+function randomPassword(len = 14) {
+  // URL セーフで記号も少し含む
+  const s = crypto.randomBytes(24).toString("base64url"); // 32～ chars
+  // 見やすさのために先頭 len 文字に
+  return s.slice(0, len);
+}
+
+async function hashPassword(plain: string) {
+  return await bcrypt.hash(plain, 10);
+}
+
+/** GET /api/admin/users  : SUPER or ADMIN が一覧閲覧 */
+export async function GET() {
+  const s = await getSession();
+  if (!s) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(s.isSuper || s.role === "ADMIN")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
-}
 
-function genTempPassword(len = 14) {
-  const s = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*()-_=+";
-  return Array.from({ length: len }, () => s[Math.floor(Math.random() * s.length)]).join("");
-}
-
-/** 一覧取得（ADMIN 以上） */
-export async function GET(_req: NextRequest) {
-  const me = await getMe();
-  if (!me) return jsonNoStore({ ok: false, error: "unauthenticated" }, 401);
-  if (!(me.isSuper || me.role === "ADMIN")) return jsonNoStore({ ok: false, error: "forbidden" }, 403);
-
-  const users = await prisma.user.findMany({
-    orderBy: [{ isActive: "desc" }, { role: "asc" }, { username: "asc" }],
-    select: { id: true, username: true, role: true, isActive: true, createdAt: true, updatedAt: true },
+  const items = await prisma.user.findMany({
+    orderBy: [{ id: "desc" }],
+    select: {
+      id: true,
+      username: true,
+      role: true,
+      isActive: true,
+      isSuper: true,
+      createdAt: true,
+      updatedAt: true,
+    },
   });
 
-  return jsonNoStore({ items: users }, 200);
+  return NextResponse.json({ items: items.map(sanitizeUser) });
 }
 
-/** 追加（SUPER 限定） */
-export async function POST(req: NextRequest) {
-  const me = await getMe();
-  if (!me) return jsonNoStore({ ok: false, error: "unauthenticated" }, 401);
-  if (!me.isSuper) return jsonNoStore({ ok: false, error: "forbidden" }, 403);
+/** POST /api/admin/users  : SUPER が作成。password が空ならランダム発行 */
+export async function POST(req: Request) {
+  const s = await getSession();
+  if (!s) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!s.isSuper) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const body = (await req.json().catch(() => ({}))) as {
-    username?: string;
-    role?: PrismaRole | string;
-    password?: string;
-  };
+  const body = await req.json().catch(() => ({} as any));
+  const username = String(body?.username ?? "").trim();
+  const role = String(body?.role ?? "").trim().toUpperCase() as Role;
+  let password: string | undefined = String(body?.password ?? "").trim() || undefined;
 
-  const username = String(body.username ?? "").trim();
-  const roleStr = String(body.role ?? "").toUpperCase() as Role;
-  const rawPwd = String(body.password ?? "");
-
-  if (!username || !roleStr || !ROLES.includes(roleStr)) {
-    return jsonNoStore({ ok: false, error: "bad_request" }, 400);
+  if (!username || !ROLES.includes(role)) {
+    return NextResponse.json({ error: "username / role は必須です" }, { status: 400 });
   }
 
-  const pwd = rawPwd.length >= 8 ? rawPwd : genTempPassword();
-  const passwordHash = await bcrypt.hash(pwd, 10);
+  // 一時パス発行（空なら生成）
+  if (!password) password = randomPassword(14);
+  const passwordHash = await hashPassword(password);
 
   try {
     const user = await prisma.user.create({
-      data: { username, role: roleStr as PrismaRole, passwordHash, isActive: true },
-      select: { id: true, username: true, role: true, isActive: true, createdAt: true, updatedAt: true },
+      data: {
+        username,
+        role,
+        passwordHash,
+        isActive: true,
+        // isSuper はこの API からは付与しない（安全のため）
+      },
+      select: {
+        id: true,
+        username: true,
+        role: true,
+        isActive: true,
+        isSuper: true,
+        createdAt: true,
+        updatedAt: true,
+      },
     });
 
-    return jsonNoStore({ user, tempPassword: pwd }, 201);
-  } catch (e: unknown) {
-    const err = e as Prisma.PrismaClientKnownRequestError;
-    if (err?.code === "P2002") {
-      // unique constraint (e.g. username)
-      return jsonNoStore({ error: "USERNAME_TAKEN" }, 409);
-    }
-    return jsonNoStore({ error: "SERVER_ERROR" }, 500);
+    return NextResponse.json({ user: sanitizeUser(user), tempPassword: password }, { status: 201 });
+  } catch (e: any) {
+    const msg =
+      e?.code === "P2002" ? "そのユーザー名は既に使われています" : e?.message || "作成に失敗しました";
+    return NextResponse.json({ error: msg }, { status: 400 });
   }
 }
