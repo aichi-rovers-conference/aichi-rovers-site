@@ -68,6 +68,7 @@ export async function GET() {
     where: { isPublic: true },
     orderBy: { createdAt: "desc" },
     include: {
+      _count: { select: { submissions: true } }, // ★ 票＝Submission件数を数える
       questions: {
         orderBy: { index: "asc" },
         include: { choices: { orderBy: { index: "asc" } } },
@@ -75,9 +76,10 @@ export async function GET() {
     },
   });
 
-  // レスポンスに RATING の「rating」をミラー
+  // レスポンスに RATING の「rating」をミラー + votesCount を追加
   const out = polls.map((p) => ({
     ...p,
+    votesCount: p._count?.submissions ?? 0, // ★ 追加
     questions: p.questions.map((q) => {
       const cfg = q.config ?? null;
       const rating = q.type === QuestionType.RATING ? normalizeRatingConfig(cfg) : undefined;
@@ -113,7 +115,7 @@ export async function POST(req: Request) {
   const title = String(raw.title ?? "").trim();
   if (!title) return NextResponse.json({ error: "title が必要です" }, { status: 400 });
 
-  const questions = Array.isArray(raw.questions) ? (raw.questions as NewQuestion[]) : [];
+  const questions = Array.isArray((raw as NewPollBody).questions) ? ((raw as NewPollBody).questions as NewQuestion[]) : [];
   if (questions.length === 0) {
     return NextResponse.json({ error: "questions が必要です" }, { status: 400 });
   }
@@ -123,8 +125,8 @@ export async function POST(req: Request) {
       const created = await tx.poll.create({
         data: {
           title,
-          desc: (raw.desc as string | undefined) ?? null,
-          closesAt: raw.closesAt ? new Date(String(raw.closesAt)) : null,
+          desc: (raw as NewPollBody).desc ?? null,
+          closesAt: (raw as NewPollBody).closesAt ? new Date(String((raw as NewPollBody).closesAt)) : null,
           isPublic: true,
         },
       });
@@ -164,6 +166,7 @@ export async function POST(req: Request) {
     const full = await prisma.poll.findUnique({
       where: { id: poll.id },
       include: {
+        _count: { select: { submissions: true } }, // ★ 作成直後も票数を付与（0のはず）
         questions: {
           orderBy: { index: "asc" },
           include: { choices: { orderBy: { index: "asc" } } },
@@ -175,6 +178,7 @@ export async function POST(req: Request) {
 
     const out = {
       ...full,
+      votesCount: full._count?.submissions ?? 0, // ★ 追加
       questions: full.questions.map((q) => {
         const cfg = q.config ?? null;
         const rating = q.type === QuestionType.RATING ? normalizeRatingConfig(cfg) : undefined;

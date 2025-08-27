@@ -11,6 +11,9 @@ export type PollCardData = {
   title: string;
   description?: string;
   imageUrl?: string;
+  /** サーバー側で埋める推奨 */
+  votesCount?: number;
+  /** 互換用（残してOK） */
   votes?: { id: string }[];
 };
 
@@ -56,7 +59,14 @@ function PollCardImpl({ poll, isEditing = false, onDelete, footer }: PollCardPro
   const y = useTransform(scrollYProgress, [0, 1], ["-8%", "8%"]);
   const overlayOpacity = useTransform(scrollYProgress, [0, 1], [0.28, 0.36]);
 
-  const voteCount = poll.votes?.length ?? 0;
+  // 票数を堅牢に数値化（votesCount 優先、なければ votes.length）
+  const rawCount =
+    typeof poll.votesCount === "number"
+      ? poll.votesCount
+      : Array.isArray(poll.votes)
+      ? poll.votes.length
+      : 0;
+  const voteCount = Number.isFinite(rawCount) ? rawCount : 0;
 
   return (
     <motion.article
@@ -128,7 +138,7 @@ function PollCardImpl({ poll, isEditing = false, onDelete, footer }: PollCardPro
 
       {/* Vote count */}
       <div className="px-4 pt-3">
-        <p className="text-xs text-gray-500">合計 {voteCount} 票</p>
+        <p className="text-xs text-gray-500">合計 {voteCount.toLocaleString("ja-JP")} 票</p>
       </div>
 
       {/* Footer（差し替え可能） */}

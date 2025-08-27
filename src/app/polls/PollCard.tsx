@@ -12,6 +12,7 @@ export type PollCardData = {
   title: string;
   description?: string;
   imageUrl?: string;
+  // 票配列は型として残しておく（ここでは使用しない）
   votes?: { id: string }[];
 };
 
@@ -56,8 +57,6 @@ function PollCardBase({ poll, isEditing = false, onDelete, footer }: Props) {
 
   const y = useTransform(scrollYProgress, [0, 1], ["-8%", "8%"]);
   const overlayOpacity = useTransform(scrollYProgress, [0, 1], [0.28, 0.36]);
-
-  const voteCount = poll.votes?.length ?? 0;
 
   return (
     <motion.article
@@ -125,11 +124,6 @@ function PollCardBase({ poll, isEditing = false, onDelete, footer }: Props) {
             </motion.p>
           )}
         </div>
-      </div>
-
-      {/* Vote count */}
-      <div className="px-4 pt-3">
-        <p className="text-xs text-gray-500">合計 {voteCount} 票</p>
       </div>
 
       {/* Footer */}

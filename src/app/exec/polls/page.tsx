@@ -2,13 +2,12 @@
 "use client";
 
 import useSWR from "swr";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 import ArcHeader from "@/src/components/ArcHeader";
-import PollCard from "../../polls/PollCard";
+import PollCard from "@/src/components/polls/PollCard";
 import ScrollProgressBar from "../../polls/ScrollProgressBar";
 
 /* ===================== 型＆ユーティリティ ===================== */
@@ -18,18 +17,45 @@ type Poll = {
   title: string;
   description?: string;
   imageUrl?: string;
+
+  /** 旧: 配列で来るケース（互換用） */
   votes?: { id: string }[];
+
+  /** 推奨: サーバーで詰める */
+  votesCount?: number;
+
+  /** APIが `_count` を返すケース（Prisma の select） */
+  _count?: { submissions?: number };
 };
 
 const fetcher = (u: string) => fetch(u, { cache: "no-store" }).then((r) => r.json());
+
+/** どの形で来ても votesCount に正規化する */
+function normalizePoll(p: Poll): Poll {
+  const countFromVotes = Array.isArray(p.votes) ? p.votes.length : undefined;
+  const countFromCount = typeof p._count?.submissions === "number" ? p._count.submissions : undefined;
+
+  return {
+    ...p,
+    votesCount:
+      typeof p.votesCount === "number"
+        ? p.votesCount
+        : typeof countFromCount === "number"
+        ? countFromCount
+        : typeof countFromVotes === "number"
+        ? countFromVotes
+        : 0,
+  };
+}
 
 /* ===================== ページ本体 ===================== */
 
 export default function PollsPage() {
   const { data, isLoading, mutate } = useSWR("/api/polls", fetcher);
 
-  // APIの戻りが [{...}] でも {items:[...]} でも吸収
-  const polls: Poll[] = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
+  // APIの戻りが [{...}] でも {items:[...]} でも吸収 → さらに votesCount 正規化
+  const raw: Poll[] = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
+  const polls: Poll[] = raw.map(normalizePoll);
 
   const [isEditing, setIsEditing] = useState(false);
 
@@ -37,13 +63,14 @@ export default function PollsPage() {
   const handleDelete = useCallback(
     async (id: string) => {
       const previous = polls;
+      // 一時反映（SWRキャッシュはとりあえず配列を入れてOK。後で再検証する）
       mutate(polls.filter((p) => p.id !== id), false);
       try {
         const res = await fetch(`/api/polls/${encodeURIComponent(id)}`, { method: "DELETE" });
         if (!res.ok) throw new Error("Failed to delete");
-        await mutate();
+        await mutate(); // 再フェッチ
       } catch {
-        mutate(previous, false);
+        mutate(previous, false); // ロールバック
       }
     },
     [polls, mutate]
