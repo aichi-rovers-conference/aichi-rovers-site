@@ -122,7 +122,7 @@ export default function UsersAdminPage() {
         body: JSON.stringify(form),
       });
       if (res.status === 401) {
-        router.replace(`/login?next=${encodeURIComponent("/polls/admin/users")}&auth=expired`);
+        setError("セッションが切れました。再ログインしてください。");
         return;
       }
       if (res.status === 403) {
@@ -149,7 +149,7 @@ export default function UsersAdminPage() {
       body: JSON.stringify(patch),
     });
     if (res.status === 401) {
-      router.replace(`/login?next=${encodeURIComponent("/polls/admin/users")}&auth=expired`);
+      setError("セッションが切れました。再ログインしてください。");
       return;
     }
     if (res.status === 403) {
@@ -180,7 +180,7 @@ export default function UsersAdminPage() {
       credentials: "include",
     });
     if (res.status === 401) {
-      router.replace(`/login?next=${encodeURIComponent("/polls/admin/users")}&auth=expired`);
+      setError("セッションが切れました。再ログインしてください。");
       return;
     }
     if (res.status === 403) {

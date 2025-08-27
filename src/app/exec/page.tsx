@@ -6,6 +6,7 @@ import ArcHeader from "@/src/components/ArcHeader";
 import Link from "next/link";
 import React, { type ReactNode } from "react";
 import styles from "./exec.module.css";
+import ClientRole from "@/src/components/ClientRole";
 import {
   ShieldCheck,
   Users,
@@ -33,6 +34,8 @@ export default async function ExecPage() {
   }
 
   const isAdmin = session.role === "ADMIN";
+  const isSuper = 
+    session.isSuper === true;
 
   const links: {
     href: string;
@@ -64,7 +67,7 @@ export default async function ExecPage() {
     },
   ];
 
-  const canEditCalendar = session.role === "ADMIN" || session.role === "EDITOR" || session.isSuper;
+  const canEditCalendar = session.role === "ADMIN" || session.role === "EDITOR" || isSuper;
 
   if(canEditCalendar) {
     links.push({
@@ -76,7 +79,7 @@ export default async function ExecPage() {
     });
   }
 
-  if (isAdmin) {
+  if (isSuper) {
     links.push({
       href: "/exec/CommitteeManage",
       icon: <UserCog className="size-6 md:size-7 xl:size-8" />,
@@ -111,7 +114,9 @@ export default async function ExecPage() {
                 運営委員ダッシュボード
               </h1>
               <p className="mt-2 text-gray-700 text-base md:text-lg">
-                ようこそ、<span className="font-semibold">{String(session.username)}</span> さん（{String(session.role)}）
+                ようこそ、<span className="font-semibold">{String(session.username)}</span> さん（
+                <ClientRole fallbackRole={String(session.role)} fallbackSuper={isSuper} />
+                ）
               </p>
               <p className="mt-2 text-sm md:text-base text-gray-500 max-w-prose">
                 参加者・会・アンケートの管理にすばやくアクセスできます。

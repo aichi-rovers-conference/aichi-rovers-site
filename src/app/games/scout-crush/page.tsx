@@ -16,6 +16,7 @@ type Cell = {
   id: string;
   type: TileType;
   special?: Special;
+  specialDir?: "row" | "col"; // firework の向き
   fresh?: boolean;
 };
 
@@ -42,7 +43,7 @@ const SWIPE_THRESHOLD = 18;
 
 function Icon({ type, special }: { type: TileType; special?: Special }) {
   if (special === "propeller") return <span>🪶</span>;
-  if (special === "firework") return <span>🎆</span>;
+  if (special === "firework") return <span>🎆</span>; // 向きは見た目同一・挙動で差別化
   if (special === "bomb") return <span>💣</span>;
   if (special === "mystic") return <span>✨</span>;
   switch (type) {
@@ -72,9 +73,116 @@ function formatTime(ms: number) {
 
 function shuffleArray<T>(arr: T[]) {
   for (let i = arr.length - 1; i > 0; i--) {
-    const j = (Math.random() * (i + 1)) | 0;
-    [arr[i], arr[j]] = [arr[j], arr[i]];
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = arr[i]!;
+    arr[i] = arr[j]!;
+    arr[j] = tmp;
   }
+}
+
+// ---- 直線セグメント（>=3）スキャン / スクエアスキャン ----
+type LineSeg = { orient: "row" | "col"; type: TileType; cells: number[] };
+
+function scanLineSegments(g: Cell[]): LineSeg[] {
+  const segs: LineSeg[] = [];
+  // 横
+  for (let r = 0; r < SIZE; r++) {
+    let curType: TileType | null = null;
+    let run: number[] = [];
+    for (let c = 0; c < SIZE; c++) {
+      const i = index(r, c), t = g[i].type;
+      if (t === curType) run.push(i);
+      else {
+        if (run.length >= 3) segs.push({ orient: "row", type: curType!, cells: run.slice() });
+        curType = t; run = [i];
+      }
+    }
+    if (run.length >= 3) segs.push({ orient: "row", type: curType!, cells: run.slice() });
+  }
+  // 縦
+  for (let c = 0; c < SIZE; c++) {
+    let curType: TileType | null = null;
+    let run: number[] = [];
+    for (let r = 0; r < SIZE; r++) {
+      const i = index(r, c), t = g[i].type;
+      if (t === curType) run.push(i);
+      else {
+        if (run.length >= 3) segs.push({ orient: "col", type: curType!, cells: run.slice() });
+        curType = t; run = [i];
+      }
+    }
+    if (run.length >= 3) segs.push({ orient: "col", type: curType!, cells: run.slice() });
+  }
+  return segs;
+}
+
+function scanSquares(g: Cell[]) {
+  const squares: { type: TileType; cells: number[]; pivot: number }[] = [];
+  for (let r = 0; r < SIZE - 1; r++) {
+    for (let c = 0; c < SIZE - 1; c++) {
+      const i00 = index(r, c), i01 = index(r, c + 1);
+      const i10 = index(r + 1, c), i11 = index(r + 1, c + 1);
+      const t = g[i00].type;
+      if (g[i01].type === t && g[i10].type === t && g[i11].type === t) {
+        squares.push({ type: t, cells: [i00, i01, i10, i11], pivot: i00 });
+      }
+    }
+  }
+  return squares;
+}
+
+// 形状 -> 生成する特殊の決定（1パスにつき1つ）
+function pickSpecialForFirstPass(g: Cell[], clears: Set<number>) {
+  const inClears = (arr: number[]) => arr.every(i => clears.has(i));
+  const segs = scanLineSegments(g);
+  const squares = scanSquares(g).filter(sq => inClears(sq.cells));
+
+  // 5 連以上の直線 → mystic（同柄全消し）
+  const lines5 = segs.filter(s => s.cells.length >= 5 && inClears(s.cells));
+  if (lines5.length) {
+    const s = lines5[0];
+    const mid = s.cells[Math.floor(s.cells.length / 2)];
+    return { index: mid, special: "mystic" as const };
+  }
+
+  // L/T 判定（直線セグメントの交差）
+  const hSegs = segs.filter(s => s.orient === "row");
+  const vSegs = segs.filter(s => s.orient === "col");
+  const isEnd = (seg: LineSeg, i: number) => i === seg.cells[0] || i === seg.cells[seg.cells.length - 1];
+  const isMid = (seg: LineSeg, i: number) => !isEnd(seg, i);
+
+  for (const h of hSegs) for (const v of vSegs) {
+    if (h.type !== v.type) continue;
+    const setH = new Set(h.cells);
+    const cross = v.cells.find(i => setH.has(i));
+    if (cross == null) continue;
+    if (!clears.has(cross)) continue;
+
+    // T：交差点がどちらかの真ん中
+    if ((isMid(h, cross) && isEnd(v, cross)) || (isEnd(h, cross) && isMid(v, cross))) {
+      return { index: cross, special: "bomb" as const };
+    }
+    // L：両方端で交差
+    if (isEnd(h, cross) && isEnd(v, cross)) {
+      return { index: cross, special: "propeller" as const };
+    }
+  }
+
+  // 2x2 スクエア → プロペラ
+  if (squares.length) {
+    const s = squares[0];
+    return { index: s.pivot, special: "propeller" as const };
+  }
+
+  // 4 連直線 → firework（向き）
+  const lines4 = segs.filter(s => s.cells.length === 4 && inClears(s.cells));
+  if (lines4.length) {
+    const s = lines4[0];
+    const pivot = s.cells[1]; // 中腹を採用
+    return { index: pivot, special: "firework" as const, dir: s.orient };
+  }
+
+  return null;
 }
 
 export default function Page() {
@@ -196,7 +304,7 @@ export default function Page() {
     const clears = findClears(g);
     if (clears.size === 0) {
       setInvalidSwap({ a, b, at: Date.now() });
-      setMessage("入れ替え不可：4個以上が揃いません");
+      setMessage("入れ替え不可：3個以上が揃いません"); // ← 3マッチに更新
       setGrid(original);
       setTimeout(() => setMessage(""), 1200);
       await wait(380);
@@ -229,9 +337,15 @@ export default function Page() {
       case "bomb":
         for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) add(r + dr, c + dc);
         break;
-      case "firework":
-        for (let x = 0; x < SIZE; x++) add(r, x);
+      case "firework": {
+        const dir = cell.specialDir ?? "row";
+        if (dir === "row") {
+          for (let x = 0; x < SIZE; x++) add(r, x);
+        } else {
+          for (let x = 0; x < SIZE; x++) add(x, c);
+        }
         break;
+      }
       case "propeller":
         for (let x = 0; x < SIZE; x++) { add(r, x); add(x, c); }
         break;
@@ -249,38 +363,50 @@ export default function Page() {
     setBusy(false);
   }
 
-  // 4個以上の塊
+  // === 3マッチ + 2x2 スクエア検出 ===
   function findClears(g: Cell[]) {
     const rm = new Set<number>();
-    // 横
+
+    // 横ラン（>=3）
     for (let r = 0; r < SIZE; r++) {
+      let runType: TileType | null = null;
       let run: number[] = [];
-      let prev: Cell | null = null;
       for (let c = 0; c < SIZE; c++) {
-        const i = index(r, c), cur = g[i];
-        if (prev && cur.type === prev.type) run.push(i);
+        const i = index(r, c), t = g[i].type;
+        if (t === runType) run.push(i);
         else {
-          if (run.length >= 3) { const all = [index(r, c - run.length - 1), ...run]; if (all.length >= 4) all.forEach(k => rm.add(k)); }
-          run = [];
+          if (run.length >= 3) run.forEach(k => rm.add(k));
+          runType = t; run = [i];
         }
-        prev = cur;
       }
-      if (run.length >= 3) { const all = [index(r, SIZE - run.length - 1), ...run]; if (all.length >= 4) all.forEach(k => rm.add(k)); }
+      if (run.length >= 3) run.forEach(k => rm.add(k));
     }
-    // 縦
+
+    // 縦ラン（>=3）
     for (let c = 0; c < SIZE; c++) {
+      let runType: TileType | null = null;
       let run: number[] = [];
-      let prev: Cell | null = null;
       for (let r = 0; r < SIZE; r++) {
-        const i = index(r, c), cur = g[i];
-        if (prev && cur.type === prev.type) run.push(i);
+        const i = index(r, c), t = g[i].type;
+        if (t === runType) run.push(i);
         else {
-          if (run.length >= 3) { const all = [index(r - run.length - 1, c), ...run]; if (all.length >= 4) all.forEach(k => rm.add(k)); }
-          run = [];
+          if (run.length >= 3) run.forEach(k => rm.add(k));
+          runType = t; run = [i];
         }
-        prev = cur;
       }
-      if (run.length >= 3) { const all = [index(SIZE - run.length - 1, c), ...run]; if (all.length >= 4) all.forEach(k => rm.add(k)); }
+      if (run.length >= 3) run.forEach(k => rm.add(k));
+    }
+
+    // 2x2 スクエア
+    for (let r = 0; r < SIZE - 1; r++) {
+      for (let c = 0; c < SIZE - 1; c++) {
+        const i00 = index(r, c), i01 = index(r, c + 1);
+        const i10 = index(r + 1, c), i11 = index(r + 1, c + 1);
+        const t = g[i00].type;
+        if (g[i01].type === t && g[i10].type === t && g[i11].type === t) {
+          rm.add(i00); rm.add(i01); rm.add(i10); rm.add(i11);
+        }
+      }
     }
     return rm;
   }
@@ -331,12 +457,24 @@ export default function Page() {
 
       const suppressSpecialThisPass = opts.firstClearFromSpecial === true && combo === 1;
 
-      if (!suppressSpecialThisPass && clears.size >= 5) {
-        const pick = [...clears][Math.floor(Math.random() * clears.size)];
-        g[pick] = { ...g[pick], special: clears.size >= 6 ? "bomb" : "firework", id: crypto.randomUUID(), fresh: false };
-        clears.delete(pick);
+      // ---- 形状に応じた特殊生成（1パスにつき1つ）----
+      if (!suppressSpecialThisPass) {
+        const pick = pickSpecialForFirstPass(g, clears);
+        if (pick) {
+          const i = pick.index;
+          const base = g[i];
+          g[i] = {
+            ...base,
+            id: crypto.randomUUID(),
+            fresh: false,
+            special: pick.special,
+            specialDir: pick.special === "firework" ? (pick as any).dir : undefined,
+          };
+          clears.delete(i); // 生成したセルは消さない
+        }
       }
 
+      // ---- 消去 & 落下 & 補充 ----
       const holes: (Cell | null)[] = g.map((cell, i) => (clears.has(i) ? null : { ...cell, fresh: false }));
       for (let c = 0; c < SIZE; c++) {
         const col: (Cell | null)[] = [];
@@ -426,9 +564,9 @@ export default function Page() {
 
   function shuffleGrid() {
     markAction();
-    const parts = grid.map(({ type, special }) => ({ type, special }));
+    const parts = grid.map(({ type, special, specialDir }) => ({ type, special, specialDir }));
     shuffleArray(parts);
-    const ng = parts.map(p => ({ id: crypto.randomUUID(), type: p.type, special: p.special, fresh: true }));
+    const ng = parts.map(p => ({ id: crypto.randomUUID(), type: p.type, special: p.special, specialDir: p.specialDir, fresh: true }));
     setGrid(ensurePlayableBoard(ng));
     setStuck(false);
     setSelected(null);
@@ -560,7 +698,7 @@ export default function Page() {
             </Link>
 
             <h1 className="text-3xl md:text-4xl font-extrabold">Scout Crush</h1>
-            <p className="text-slate-600">4個以上で消えるタイムアタック。時間が増えるうちにスコアを伸ばせ！</p>
+            <p className="text-slate-600">同柄<strong>3個以上</strong>で消えるタイムアタック。時間が増えるうちにスコアを伸ばせ！</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <input
@@ -724,7 +862,7 @@ export default function Page() {
             >
               <h3 className="text-xl md:text-2xl font-extrabold">Scout Crush の遊び方</h3>
               <p className="mt-2 text-slate-600 text-sm md:text-base">
-                8×8で隣を入れ替え<strong>同柄4つ以上</strong>で消去。消すたび<strong>スコア</strong>＆<strong>時間</strong>UP、<strong>連鎖</strong>でボーナスUP！
+                8×8で隣を入れ替え<strong>同柄3つ以上</strong>で消去。消すたび<strong>スコア</strong>＆<strong>時間</strong>UP、<strong>連鎖</strong>でボーナスUP！
               </p>
 
               <div className="mt-4 grid md:grid-cols-2 gap-4">
@@ -740,10 +878,10 @@ export default function Page() {
                 <div className="rounded-xl border bg-slate-50/60 p-3">
                   <h4 className="font-bold text-slate-800">スペシャル（ワンタップ発動）</h4>
                   <ul className="mt-2 text-sm text-slate-700 space-y-1.5">
-                    <li>🪶 <b>Propeller</b>：その行＋列を一掃</li>
-                    <li>🎆 <b>Firework</b>：横一列を一掃</li>
-                    <li>💣 <b>Bomb</b>：周囲3×3を爆破</li>
-                    <li>✨ <b>Mystic</b>：同じ絵柄をまとめて消去</li>
+                    <li>🪶 <b>Propeller</b>：その行＋列を一掃（2×2 / L で生成）</li>
+                    <li>🎆 <b>Firework</b>：縦 or 横いずれか一列（4連直線で生成）</li>
+                    <li>💣 <b>Bomb</b>：周囲3×3（T 形で生成）</li>
+                    <li>✨ <b>Mystic</b>：同じ絵柄を全消し（5連以上で生成）</li>
                   </ul>
                 </div>
               </div>
