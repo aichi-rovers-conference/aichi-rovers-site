@@ -4,12 +4,9 @@ import prisma from "@/lib/prisma";
 import { cookies } from "next/headers";
 import { verifyToken, COOKIE_NAME } from "@/lib/auth";
 import { getMailer, smtpEnvStatus } from "@/lib/mailer";
+import crypto from "crypto";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
-/** 改行維持＋URL自動リンク（簡易） */
+/** HTML化（改行維持＋URL簡易リンク化） */
 function textToHtml(text: string): string {
   const esc = (s: string) =>
     s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
@@ -21,7 +18,7 @@ function textToHtml(text: string): string {
   return `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:14px;line-height:1.7;color:#0f172a;white-space:pre-line;">${escaped}</div>`;
 }
 
-/** 失敗メッセージから推定原因を返す */
+/** 失敗メッセージから推定原因 */
 function classifySmtpError(msg: string) {
   const m = (msg || "").toLowerCase();
   if (m.includes("535") || m.includes("invalid login") || m.includes("authentication failed"))
@@ -34,12 +31,16 @@ function classifySmtpError(msg: string) {
     return "送信レート制限超過（SESのSending Quota/Rateを確認）";
   if (m.includes("self signed certificate") || m.includes("certificate"))
     return "TLS証明書問題（まず SMTP_PORT=587 / SMTP_SECURE=false で）";
-  return "不明（failures[].error を全部参照 / SESのイベントで要確認）";
+  return "不明（failures[].error を参照 / プロバイダのイベントで要確認）";
 }
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export async function POST(req: NextRequest) {
   try {
-    // 認証
+    // 認証 & 権限: ADMIN または isSuper のみ許可
     const jar = await cookies();
     const token = jar.get(COOKIE_NAME)?.value ?? "";
     const me = token ? await verifyToken(token) : null;
@@ -48,8 +49,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const body = (await req.json().catch(() => ({}))) as { max?: number };
-    const max = Math.min(200, Math.max(1, Number.isFinite(Number(body?.max)) ? Number(body!.max) : 50));
+    const payload = (await req.json().catch(() => ({}))) as { max?: number };
+    const max = Math.min(200, Math.max(1, Number.isFinite(Number(payload?.max)) ? Number(payload!.max) : 50));
 
     // メーラー
     let transporter;
@@ -61,8 +62,6 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-
-    // 認証/ネットワークの根本異常を先に検出
     try {
       await transporter.verify();
     } catch (e: any) {
@@ -73,22 +72,46 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const from =
-      process.env.SMTP_FROM ??
-      process.env.MAIL_FROM ??
-      (process.env.SMTP_USER as string);
+    const from = process.env.SMTP_FROM ?? process.env.MAIL_FROM ?? (process.env.SMTP_USER as string);
 
-    // バッチ取得
-    const pending = await prisma.emailQueue.findMany({
-      where: { status: "PENDING" },
-      orderBy: { queuedAt: "asc" },
-      take: max,
+    // ===== ロック取得（PENDING & scheduledAt <= now & ロックなし/期限切れ）=====
+    const lockId = crypto.randomUUID();
+    const lockTTLms = 5 * 60 * 1000; // 5分
+    const now = new Date();
+
+    const targets = await prisma.$transaction(async (tx) => {
+      const rows = await tx.emailQueue.findMany({
+        where: {
+          status: "PENDING",
+          scheduledAt: { lte: now },
+          OR: [{ lockedAt: null }, { lockedAt: { lt: new Date(Date.now() - lockTTLms) } }],
+        },
+        orderBy: { scheduledAt: "asc" },
+        take: Math.max(1, Math.min(500, max)),
+      });
+
+      if (rows.length === 0) return rows;
+
+      await Promise.all(
+        rows.map((r) =>
+          tx.emailQueue.update({
+            where: { id: r.id },
+            data: { lockId, lockedAt: new Date() }, // status は PENDING のままで排他
+          })
+        )
+      );
+
+      return rows;
     });
 
-    let sent = 0, failed = 0;
+    let sent = 0;
+    let failed = 0;
     const failures: Array<{ id: string; to: string; error: string; reason: string; code?: any; respCode?: any }> = [];
 
-    for (const m of pending) {
+    const backoffBaseMs = 5 * 60 * 1000; // 5分
+    const maxAttempts = 5;
+
+    for (const m of targets) {
       try {
         const html = textToHtml(m.body || "");
         await transporter.sendMail({
@@ -98,22 +121,52 @@ export async function POST(req: NextRequest) {
           text: m.body ?? "",
           html,
         });
-        await prisma.emailQueue.update({ where: { id: m.id }, data: { status: "SENT", sentAt: new Date(), error: null } });
+
+        await prisma.emailQueue.update({
+          where: { id: m.id },
+          data: { status: "SENT", sentAt: new Date(), error: null, lockId: null, lockedAt: null },
+        });
         sent++;
       } catch (e: any) {
         const errMsg = e?.message || String(e);
         const reason = classifySmtpError(errMsg);
+
+        const attempts = (m.attempts ?? 0) + 1;
+        const giveUp = attempts >= maxAttempts;
+
+        const waitMs = Math.min(60 * 60 * 1000, backoffBaseMs * Math.pow(2, attempts - 1)); // 最大1時間
+        const nextTime = new Date(Date.now() + waitMs);
+
+        await prisma.emailQueue.update({
+          where: { id: m.id },
+          data: {
+            attempts,
+            status: giveUp ? "FAILED" : "PENDING",
+            error: errMsg,
+            lockId: null,
+            lockedAt: null,
+            scheduledAt: giveUp ? m.scheduledAt : nextTime,
+          },
+        });
+
         failures.push({ id: m.id, to: m.to, error: errMsg, reason, code: e?.code, respCode: e?.responseCode });
-        await prisma.emailQueue.update({ where: { id: m.id }, data: { status: "FAILED", error: errMsg } });
         failed++;
       }
     }
 
-    const remaining = await prisma.emailQueue.count({ where: { status: "PENDING" } });
+    const remaining = await prisma.emailQueue.count({
+      where: { status: "PENDING", scheduledAt: { lte: new Date() } },
+    });
     const hints = Array.from(new Set(failures.map((f) => f.reason)));
 
-    return NextResponse.json({ ok: true, sent, failed, remaining, failures, hints }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json(
+      { ok: true, sent, failed, remaining, failures, hints },
+      { headers: { "Cache-Control": "no-store" } }
+    );
   } catch (e: any) {
-    return NextResponse.json({ error: e?.code || "SERVER_ERROR", message: e?.message || String(e) }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.code || "SERVER_ERROR", message: e?.message || String(e) },
+      { status: 500 }
+    );
   }
 }
