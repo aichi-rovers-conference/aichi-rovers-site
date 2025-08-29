@@ -1,13 +1,13 @@
-// app/arc/page.tsx など、このページファイルまるごと置き換え
+// app/arc/page.tsx
 "use client";
 
-import { useState, useRef } from "react";
-import Link from "next/link";
+import { useState } from "react";
 import Image from "next/image";
-import { motion, useScroll, useTransform } from "framer-motion";
-import { FaFacebook, FaInstagram, FaXTwitter, FaLine } from "react-icons/fa6";
+import { motion } from "framer-motion";
+
 import ArcHeader1 from "@/src/components/ArcHeader1";
 import ArcFooter from "@/src/components/ArcFooter";
+import HeroImage from "@/src/components/HeroImage";
 
 /** セクション（左テキスト／右画像） */
 function TextRightImage({
@@ -50,7 +50,7 @@ function TextRightImage({
 }
 
 export default function AboutArcPage() {
-  const [isOpen] = useState(false); // ドロワー等で使う場合は状態を受け渡し
+  const [isOpen] = useState(false);
   const navItems = [
     { name: "ホーム", path: "/" },
     { name: "ARCとは", path: "/arc" },
@@ -61,56 +61,42 @@ export default function AboutArcPage() {
     { name: "ミニゲーム", path: "/games" },
   ];
 
-  // ====== ヒーロー（モバイルで動き控えめ） ======
-  const heroRef = useRef<HTMLDivElement | null>(null);
-  const { scrollYProgress } = useScroll({
-    target: heroRef,
-    offset: ["start start", "end start"],
-  });
-  const yImg = useTransform(scrollYProgress, [0, 1], [0, 240]); // 画像の移動量を控えめに
-  const overlayOpacity = useTransform(scrollYProgress, [0, 1], [0.45, 0.6]); // 暗幕
-
   return (
     <div className="w-full bg-white">
       {/* ヘッダー */}
       <ArcHeader1 navItems={navItems} />
 
-      {/* ヒーロー：ページ専用タイトル */}
-      <div ref={heroRef} className="relative w-full h-[42vh] sm:h-[46vh] overflow-hidden select-none">
-        <motion.div style={{ y: yImg }} className="absolute inset-0 will-change-transform">
-          <Image
-            src="/images/R6-3.JPG"
-            alt="Aichi Rovers Conference"
-            fill
-            priority
-            sizes="100vw"
-            className="object-cover z-0 select-none"
-            draggable={false}
-          />
-        </motion.div>
-        <motion.div style={{ opacity: overlayOpacity }} className="absolute inset-0 bg-black z-10" />
-        <motion.div
-          className={`absolute inset-0 z-20 flex flex-col items-center justify-center text-center ${
-            isOpen ? "pointer-events-none opacity-0" : "opacity-100"
-          }`}
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.9, ease: "easeOut" }}
-        >
-          <h1
-            className="text-white font-extrabold drop-shadow-lg leading-tight"
-            style={{ fontSize: "clamp(28px, 7vw, 48px)" }} // 28〜48px 可変
+      {/* ★ 共通ヒーロー適用（パララックス + オーバーレイ + 自動blur 対応） */}
+      <HeroImage
+        src="/images/R6-3.JPG"                 // public配下。静的インポートに替えてもOK
+        alt="Aichi Rovers Conference"
+        heightClass="h-[42vh] sm:h-[46vh]"     // ページに合わせて高さ調整
+        parallaxAmount={180}
+        overlayOpacityRange={[0.45, 0.6]}
+      >
+        {!isOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.9, ease: "easeOut" }}
+            aria-hidden={isOpen}
+            className="text-center"
           >
-            ARCとは
-          </h1>
-          <p
-            className="text-white/90 font-medium mt-2 sm:mt-3"
-            style={{ fontSize: "clamp(14px, 4.6vw, 24px)" }} // 14〜24px 可変
-          >
-            Aichi Rovers Conference Overview
-          </p>
-        </motion.div>
-      </div>
+            <h1
+              className="text-white font-extrabold drop-shadow-lg leading-tight"
+              style={{ fontSize: "clamp(28px, 7vw, 48px)" }}
+            >
+              ARCとは
+            </h1>
+            <p
+              className="text-white/90 font-medium mt-2 sm:mt-3"
+              style={{ fontSize: "clamp(14px, 4.6vw, 24px)" }}
+            >
+              Aichi Rovers Conference Overview
+            </p>
+          </motion.div>
+        )}
+      </HeroImage>
 
       {/* 本文 */}
       <section className="w-full bg-white py-10 sm:py-12 md:py-16 px-4 sm:px-6 md:px-10 lg:px-16">
@@ -204,6 +190,7 @@ export default function AboutArcPage() {
       <div className="mx-auto max-w-6xl mt-10 mb-8 px-4 sm:px-6 md:px-10 lg:px-16">
         <div className="border-t border-gray-300" />
       </div>
+
       <ArcFooter />
     </div>
   );

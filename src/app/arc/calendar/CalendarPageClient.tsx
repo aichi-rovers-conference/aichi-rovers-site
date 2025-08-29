@@ -1,11 +1,12 @@
 // app/arc/calendar/page.tsx
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
-import { motion, useScroll, useTransform } from "framer-motion";
+import { motion } from "framer-motion";
 import ArcHeader1 from "@/src/components/ArcHeader1";
 import ArcFooter from "@/src/components/ArcFooter";
+import HeroImage from "@/src/components/HeroImage";
 
 const EVENTS_API_URL = "/api/calendar/events";
 const RECRUIT_API_URL = "/api/calendar/recruitings";
@@ -21,8 +22,8 @@ type EventItem = {
 type RecruitingItem = {
   id: string;
   title: string;
-  date: string;      // 実施日
-  deadline: string;  // 参加期限
+  date: string; // 実施日
+  deadline: string; // 参加期限
   area: string;
   url?: string;
   urlDesc?: string;
@@ -89,16 +90,14 @@ async function safeJson(res: Response) {
   const ct = res.headers.get("content-type") || "";
   if (ct.includes("application/json")) return res.json();
   const text = await res.text();
-  try { return JSON.parse(text); } catch { return { error: text || "Unknown error" }; }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { error: text || "Unknown error" };
+  }
 }
 
 export default function CalendarPage() {
-  // ===== ヒーロー =====
-  const heroRef = useRef<HTMLDivElement | null>(null);
-  const { scrollYProgress } = useScroll({ target: heroRef, offset: ["start start", "end start"] });
-  const yImg = useTransform(scrollYProgress, [0, 1], [0, 240]);
-  const overlayOpacity = useTransform(scrollYProgress, [0, 1], [0.45, 0.6]);
-
   // ===== ナビ =====
   const navItems = [
     { name: "ホーム", path: "/" },
@@ -132,7 +131,10 @@ export default function CalendarPage() {
         setEvents(data);
         setLastUpdated(j.lastUpdated ? new Date(j.lastUpdated).toLocaleString() : "—");
       })
-      .catch(() => { setEvents([]); setLastUpdated("—"); });
+      .catch(() => {
+        setEvents([]);
+        setLastUpdated("—");
+      });
 
     // 募集（公開 & 締切未到来が返る想定）
     fetch(RECRUIT_API_URL, { cache: "no-store" })
@@ -151,7 +153,10 @@ export default function CalendarPage() {
         setRecruits(data);
         setRecruitsUpdated(j.lastUpdated ? new Date(j.lastUpdated).toLocaleString() : "—");
       })
-      .catch(() => { setRecruits([]); setRecruitsUpdated("—"); });
+      .catch(() => {
+        setRecruits([]);
+        setRecruitsUpdated("—");
+      });
   }, []);
 
   const byMonth = useMemo(() => groupByMonth(events ?? []), [events]);
@@ -161,39 +166,42 @@ export default function CalendarPage() {
       {/* ヘッダー */}
       <ArcHeader1 navItems={navItems} />
 
-      {/* ヒーロー */}
-      <div ref={heroRef} className="relative w-full h-[40vh] sm:h-[46vh] overflow-hidden select-none">
-        <motion.div style={{ y: yImg }} className="absolute inset-0 will-change-transform">
-          <Image
-            src="/images/R6-3.JPG"
-            alt="Aichi Rovers Conference"
-            fill
-            priority
-            sizes="100vw"
-            className="object-cover z-0 select-none"
-            draggable={false}
-          />
-        </motion.div>
-        <motion.div style={{ opacity: overlayOpacity }} className="absolute inset-0 bg-black z-10" />
+      {/* ★ 共通ヒーロー適用 */}
+      <HeroImage
+        src="/images/R6-3.JPG" // 静的インポートに替えてもOK
+        alt="Aichi Rovers Conference"
+        heightClass="h-[40vh] sm:h-[46vh]"
+        parallaxAmount={180}
+        overlayOpacityRange={[0.45, 0.6]}
+      >
         <motion.div
-          className="absolute inset-0 z-20 flex flex-col items-center justify-center text-center"
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.9, ease: "easeOut" }}
+          className="text-center"
         >
-          <h1 className="text-white font-extrabold drop-shadow-lg leading-tight" style={{ fontSize: "clamp(28px, 7vw, 48px)" }}>
+          <h1
+            className="text-white font-extrabold drop-shadow-lg leading-tight"
+            style={{ fontSize: "clamp(28px, 7vw, 48px)" }}
+          >
             事業カレンダー
           </h1>
-          <p className="text-white/90 font-medium mt-2 sm:mt-3" style={{ fontSize: "clamp(14px, 4.6vw, 24px)" }}>
+          <p
+            className="text-white/90 font-medium mt-2 sm:mt-3"
+            style={{ fontSize: "clamp(14px, 4.6vw, 24px)" }}
+          >
             ARC Annual Schedule & Recruiting
           </p>
         </motion.div>
-      </div>
+      </HeroImage>
 
       {/* 現在募集中の案内 */}
       <section className="w-full bg-white py-10 sm:py-12 md:py-14 px-4 sm:px-6 md:px-10 lg:px-16">
         <div className="mx-auto max-w-6xl">
-          <h2 className="text-red-600 font-bold mb-2 sm:mb-3 leading-tight" style={{ fontSize: "clamp(22px, 4.8vw, 36px)" }}>
+          <h2
+            className="text-red-600 font-bold mb-2 sm:mb-3 leading-tight"
+            style={{ fontSize: "clamp(22px, 4.8vw, 36px)" }}
+          >
             現在募集中の案内
           </h2>
           <p className="text-[13px] sm:text-sm text-gray-600 mb-4">※URLをクリックすると開催要項に移動できます</p>
@@ -262,7 +270,10 @@ export default function CalendarPage() {
       {/* 年間スケジュール */}
       <section className="w-full bg-white pb-10 sm:pb-12 md:pb-14 px-4 sm:px-6 md:px-10 lg:px-16">
         <div className="mx-auto max-w-6xl">
-          <h2 className="text-gray-800 font-extrabold tracking-tight leading-tight" style={{ fontSize: "clamp(20px, 4.4vw, 30px)" }}>
+          <h2
+            className="text-gray-800 font-extrabold tracking-tight leading-tight"
+            style={{ fontSize: "clamp(20px, 4.4vw, 30px)" }}
+          >
             年間スケジュール
           </h2>
           <div className="mt-2 h-[2px] w-16 bg-red-600 rounded-full" />

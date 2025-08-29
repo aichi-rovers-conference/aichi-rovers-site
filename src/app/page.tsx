@@ -1,17 +1,21 @@
-// app/page.tsx （またはこのホームページのファイル）
+// app/page.tsx
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { motion, useScroll, useTransform } from "framer-motion";
-import { FaFacebook, FaInstagram, FaXTwitter, FaLine } from "react-icons/fa6";
+import { motion } from "framer-motion";
+
 import ExecAccessButton from "../components/ExecAccessButton";
 import ArcHeader1 from "../components/ArcHeader1";
 import ArcFooter from "../components/ArcFooter";
+import HeroImage from "../components/HeroImage"; // ★ 先ほど作った共通ヒーロー
+
+// 必要なら AVIF/WebP を静的インポートして使ってもOK
+// import heroImg from "@/public/images/R6-3.avif";
+import sampleImg from "@/public/images/sample.png";
 
 export default function Home() {
-  // ※ ヘッダーでの open 状態を使わないなら削ってOK
   const [isOpen] = useState(false);
 
   const navItems = [
@@ -24,87 +28,56 @@ export default function Home() {
     { name: "ミニゲーム", path: "/games" },
   ];
 
-  const Hero: React.FC<{ hideText: boolean }> = ({ hideText }) => {
-    const ref = useRef<HTMLDivElement | null>(null);
-    const { scrollYProgress } = useScroll({
-      target: ref,
-      offset: ["start start", "end start"],
-    });
-    // モバイルで過剰に動きすぎないよう移動量を控えめに
-    const yImg = useTransform(scrollYProgress, [0, 1], [0, 240]);
-    const overlayOpacity = useTransform(scrollYProgress, [0, 1], [0.45, 0.6]);
-
-    return (
-      <div ref={ref} className="relative w-full h-[56vh] sm:h-[60vh] overflow-hidden select-none">
-        <motion.div style={{ y: yImg }} className="absolute inset-0 will-change-transform">
-          <Image
-            src="/images/R6-3.JPG"
-            alt="Aichi Rovers Conference"
-            fill
-            priority
-            sizes="100vw"
-            className="object-cover z-0 select-none"
-            draggable={false}
-          />
-        </motion.div>
-
-        <motion.div style={{ opacity: overlayOpacity }} className="absolute inset-0 bg-black z-10" />
-
-        {/* タイトル群：モバイルで読みやすいclamp */}
-        <motion.div
-          className={`absolute inset-0 z-20 flex flex-col items-center justify-center text-center ${
-            hideText ? "pointer-events-none" : ""
-          }`}
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: hideText ? 0 : 1, y: 0 }}
-          transition={{ duration: 1, ease: "easeOut" }}
-          aria-hidden={hideText}
-        >
-          <h1
-            className="font-bold mb-3 drop-shadow-lg text-white leading-tight"
-            style={{
-              // 22px〜56pxで可変（英字タイトル）
-              fontSize: "clamp(22px, 7vw, 56px)",
-            }}
-          >
-            <span className="text-red-700">A</span>ichi{" "}
-            <span className="text-red-700">R</span>overs <span className="text-red-700">C</span>onference
-          </h1>
-
-          <p
-            className="text-white font-bold mt-1 leading-tight"
-            style={{
-              // 16px〜40pxで可変（日本語タイトル）
-              fontSize: "clamp(16px, 6vw, 40px)",
-            }}
-          >
-            愛知ローバース会議
-          </p>
-
-          <div className="mt-6 sm:mt-8">
-            <ExecAccessButton mode="inline" label="運営委員専用ページへ" className="px-5 sm:px-6 py-2" />
-          </div>
-        </motion.div>
-      </div>
-    );
-  };
-
   return (
     <div className="w-full bg-white">
-      {/* ヘッダー（ArcHeader1/2どちらでもOK。スマホでの名前収まりは別途対応版を推奨） */}
       <ArcHeader1 navItems={navItems} />
 
-      {/* ヒーロー */}
-      <Hero hideText={isOpen} />
+      {/* ★ 共通ヒーロー（パララックス + オーバーレイ + blur 対応） */}
+      <HeroImage
+        // src={heroImg}                       // ← 静的インポートに切替える場合はこちら
+        src="/images/R6-3.JPG"                 // ← public配下のパスでもOK（自動シマーblur付与）
+        alt="Aichi Rovers Conference"
+        parallaxAmount={180}
+        overlayOpacityRange={[0.45, 0.6]}
+        // overlayClassName="bg-black/90"      // 濃くしたい場合に
+      >
+        {!isOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 1, ease: "easeOut" }}
+            aria-hidden={isOpen}
+            className="text-center"
+          >
+            <h1
+              className="font-bold mb-3 drop-shadow-lg text-white leading-tight"
+              style={{ fontSize: "clamp(22px, 7vw, 56px)" }}
+            >
+              <span className="text-red-700">A</span>ichi{" "}
+              <span className="text-red-700">R</span>overs <span className="text-red-700">C</span>onference
+            </h1>
+            <p
+              className="text-white font-bold mt-1 leading-tight"
+              style={{ fontSize: "clamp(16px, 6vw, 40px)" }}
+            >
+              愛知ローバース会議
+            </p>
+            <div className="mt-6 sm:mt-8">
+              <ExecAccessButton mode="inline" label="運営委員専用ページへ" className="px-5 sm:px-6 py-2" />
+            </div>
+          </motion.div>
+        )}
+      </HeroImage>
 
-      {/* --- 紹介セクション（モバイル最適化：余白/文字サイズを調整） --- */}
+      {/* --- 紹介セクション --- */}
       <section className="w-full bg-white py-10 sm:py-12 md:py-16 px-4 sm:px-6 md:px-10 lg:px-16">
-        <div className="mx-auto max-w-6xl grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-10 items-center">
+        <div
+          className="mx-auto max-w-6xl grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-10 items-center"
+          style={{ contentVisibility: "auto", containIntrinsicSize: "800px" }}
+        >
           {/* 左：文章 */}
           <div>
-            <h2 className="text-red-600 font-bold mb-4 sm:mb-6 text-3xl sm:text-4xl md:text-5xl">
-              輝かしい愛知の仲間と
-            </h2>
+            <h2 className="text-red-600 font-bold mb-4 sm:mb-6 text-3xl sm:text-4xl md:text-5xl">輝かしい愛知の仲間と</h2>
             <p className="text-black font-medium sm:font-semibold text-base sm:text-lg md:text-[19px] leading-relaxed mb-4">
               愛知ローバース会議（Aichi Rovers Conference）は、ボーイスカウト愛知連盟に所属する
               ローバースカウトおよび同年代指導者約700名により構成された組織です。
@@ -115,13 +88,15 @@ export default function Home() {
             </p>
           </div>
 
-          {/* 右：写真 */}
+          {/* 右：写真（静的インポートでLQIP有効） */}
           <div className="flex justify-center">
             <Image
-              src="/images/sample.png"
+              src={sampleImg}
               alt="ARC活動写真"
               width={520}
               height={420}
+              placeholder="blur"
+              loading="lazy"
               sizes="(max-width: 768px) 86vw, 520px"
               className="rounded-lg shadow-lg object-cover select-none w-full max-w-[520px] h-auto"
               draggable={false}
@@ -130,11 +105,12 @@ export default function Home() {
         </div>
 
         {/* 2つ目のブロック */}
-        <div className="mx-auto max-w-6xl mt-14 grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-10 items-center">
+        <div
+          className="mx-auto max-w-6xl mt-14 grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-10 items-center"
+          style={{ contentVisibility: "auto", containIntrinsicSize: "800px" }}
+        >
           <div>
-            <h2 className="text-red-600 font-bold mb-4 sm:mb-6 text-3xl sm:text-4xl md:text-5xl">
-              年4回の定例会
-            </h2>
+            <h2 className="text-red-600 font-bold mb-4 sm:mb-6 text-3xl sm:text-4xl md:text-5xl">年4回の定例会</h2>
             <p className="text-black font-medium sm:font-semibold text-base sm:text-lg md:text-[19px] leading-relaxed mb-4">
               愛知ローバース会議では年に1回の年次総会と年に4回の定例会を開催しています。平均60名以上が参加し、
               スカウトが情報交換や交流を行うための場として活用されています。ローバー活動の報告や募集、積極的な意見交換が繰り広げられています。
@@ -153,10 +129,12 @@ export default function Home() {
 
           <div className="flex justify-center">
             <Image
-              src="/images/sample.png"
+              src={sampleImg}
               alt="ARC活動写真"
               width={520}
               height={420}
+              placeholder="blur"
+              loading="lazy"
               sizes="(max-width: 768px) 86vw, 520px"
               className="rounded-lg shadow-lg object-cover select-none w-full max-w-[520px] h-auto"
               draggable={false}
@@ -165,11 +143,12 @@ export default function Home() {
         </div>
 
         {/* 3つ目のブロック */}
-        <div className="mx-auto max-w-6xl mt-14 grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-10 items-center">
+        <div
+          className="mx-auto max-w-6xl mt-14 grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-10 items-center"
+          style={{ contentVisibility: "auto", containIntrinsicSize: "800px" }}
+        >
           <div>
-            <h2 className="text-red-600 font-bold mb-4 sm:mb-6 text-3xl sm:text-4xl md:text-5xl">
-              自分たちによる意思決定
-            </h2>
+            <h2 className="text-red-600 font-bold mb-4 sm:mb-6 text-3xl sm:text-4xl md:text-5xl">自分たちによる意思決定</h2>
             <p className="text-black font-medium sm:font-semibold text-base sm:text-lg md:text-[19px] leading-relaxed mb-2">
               愛知ローバース会議では年次総会を毎年行っており、ローバースカウト自身による意思決定を大切にしています。
               年次総会で選任された運営委員が定例会の運営を担うことで、愛知のローバースカウト全員の団結と活躍を目指しています。
@@ -178,10 +157,12 @@ export default function Home() {
 
           <div className="flex justify-center">
             <Image
-              src="/images/sample.png"
+              src={sampleImg}
               alt="ARC活動写真"
               width={520}
               height={420}
+              placeholder="blur"
+              loading="lazy"
               sizes="(max-width: 768px) 86vw, 520px"
               className="rounded-lg shadow-lg object-cover select-none w-full max-w-[520px] h-auto"
               draggable={false}
@@ -195,7 +176,7 @@ export default function Home() {
         <div className="border-t border-gray-300" />
       </div>
 
-      {/* 資料ダウンロード：モバイルで押しやすく */}
+      {/* 資料ダウンロード */}
       <section className="bg-white pb-10 px-4 sm:px-6 md:px-10 lg:px-16">
         <div className="mx-auto max-w-6xl">
           <div className="flex justify-center">
@@ -205,6 +186,7 @@ export default function Home() {
                 alt="ARC コノハズク"
                 width={260}
                 height={260}
+                loading="lazy"
                 sizes="(max-width: 640px) 160px, 260px"
                 className="object-contain select-none w-[160px] sm:w-[200px] md:w-[260px] h-auto [-webkit-user-drag:none]"
                 draggable={false}
@@ -245,8 +227,7 @@ export default function Home() {
         </div>
       </section>
 
-    <ArcFooter />
-      
+      <ArcFooter />
     </div>
   );
 }
