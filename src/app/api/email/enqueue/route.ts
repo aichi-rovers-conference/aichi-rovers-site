@@ -65,23 +65,25 @@ export async function POST(req: NextRequest) {
 
     // テンプレ差し込みはクライアントと同じ関数を使用
     const rows = participants.map((p) => {
-      const qrUrl = buildPreviewQrUrl(origin, meetingCode, p.id); // ← 共有関数で絶対URL生成
-      const vars = {
-        name: p.name,
-        meeting: meetingCode,
-        qr_url: qrUrl,
-        troop: String(p.troop ?? ""),
-        district: String(p.district ?? ""),
-      };
-      return {
-        participantId: p.id,
-        meetingCode,
-        to: p.email as string,
-        subject: renderTemplate(subjectTpl, vars),
-        body: renderTemplate(bodyTpl, vars),
-        status: EmailStatus.PENDING,
-      };
-    });
+  const qrUrl = buildPreviewQrUrl(origin, meetingCode, p.id);
+  const vars = {
+    name: p.name,
+    meeting: meetingCode,
+    qr_url: qrUrl,
+    troop: String(p.troop ?? ""),
+    district: String(p.district ?? ""),
+  };
+  return {
+    participantId: p.id,
+    meetingCode,
+    to: p.email as string,
+    subject: renderTemplate(subjectTpl, vars),
+    body: renderTemplate(bodyTpl, vars),
+    status: EmailStatus.PENDING,
+    // ★ 追加：冪等キー（会議×参加者で一意）
+    idempotencyKey: `${meetingCode}:${p.id}`,
+  };
+});
 
     await prisma.emailQueue.createMany({
       data: rows,

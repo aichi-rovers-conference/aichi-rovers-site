@@ -180,7 +180,7 @@ model EmailQueue {
   attempts      Int         @default(0)
 
   // 二重投入防止キー（会×参加者×件名+本文などのハッシュ）
-  idempotencyKey String     @unique
+  idempotencyKey String     @unique @default(uuid())
 
   participant Participant @relation(fields: [participantId], references: [id])
 
