@@ -1,10 +1,13 @@
+// app/arc/conference/page.tsx など、このページファイルまるごと置き換え
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
-import { motion, useScroll, useTransform } from "framer-motion";
+import { motion } from "framer-motion";
 import ArcHeader1 from "@/src/components/ArcHeader1";
 import ArcFooter from "@/src/components/ArcFooter";
+import HeroImage from "@/src/components/HeroImage";
+
 /* ===== 型（DB = MeetingReportに対応） ===== */
 type MeetingReport = {
   id: number;
@@ -220,12 +223,6 @@ function MeetingCard({ m }: { m: MeetingReport }) {
 
 /* ====== ページ本体 ====== */
 export default function MeetingsPage() {
-  // ヒーロー（モバイルで動き控えめ）
-  const heroRef = useRef<HTMLDivElement | null>(null);
-  const { scrollYProgress } = useScroll({ target: heroRef, offset: ["start start", "end start"] });
-  const yImg = useTransform(scrollYProgress, [0, 1], [0, 240]);
-  const overlayOpacity = useTransform(scrollYProgress, [0, 1], [0.45, 0.6]);
-
   // ヘッダーのナビ
   const navItems = [
     { name: "ホーム", path: "/" },
@@ -281,43 +278,44 @@ export default function MeetingsPage() {
     <div className="w-full bg-white max-w-[100vw] overflow-x-clip">
       <ArcHeader1 navItems={navItems} />
 
-      {/* ヒーロー */}
-      <div
-        ref={heroRef}
-        className="relative w-full h-[40vh] sm:h-[46vh] overflow-hidden overflow-x-clip select-none"
+      {/* ★ 共通ヒーロー適用（パララックス・自動blur・オーバーレイ） */}
+      <HeroImage
+        src="/images/R6-3.JPG"
+        alt="Aichi Rovers Conference"
+        heightClass="h-[40vh] sm:h-[46vh]"
+        parallaxAmount={180}
+        overlayOpacityRange={[0.45, 0.6]}
       >
-        <motion.div style={{ y: yImg }} className="absolute inset-0 will-change-transform">
-          <Image
-            src="/images/R6-3.JPG"
-            alt="Aichi Rovers Conference"
-            fill
-            priority
-            sizes="100vw"
-            className="object-cover z-0 select-none"
-            draggable={false}
-          />
-        </motion.div>
-        <motion.div style={{ opacity: overlayOpacity }} className="absolute inset-0 bg-black z-10" />
         <motion.div
-          className="absolute inset-0 z-20 flex flex-col items-center justify-center text-center"
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.9, ease: "easeOut" }}
+          className="text-center"
         >
-          <h1 className="text-white font-extrabold drop-shadow-lg leading-tight" style={{ fontSize: "clamp(28px,7vw,48px)" }}>
+          <h1
+            className="text-white font-extrabold drop-shadow-lg leading-tight"
+            style={{ fontSize: "clamp(28px,7vw,48px)" }}
+          >
             定例会の様子
           </h1>
-          <p className="text-white/90 font-medium mt-2 sm:mt-3" style={{ fontSize: "clamp(14px,4.6vw,24px)" }}>
+          <p
+            className="text-white/90 font-medium mt-2 sm:mt-3"
+            style={{ fontSize: "clamp(14px,4.6vw,24px)" }}
+          >
             ARC Regular Meetings Report
           </p>
         </motion.div>
-      </div>
+      </HeroImage>
 
       {/* 本文 */}
       <section className="w-full bg-white py-10 sm:py-12 md:py-14 px-4 sm:px-6 md:px-10 lg:px-16 max-w-[100vw] overflow-x-clip">
         <div className="mx-auto max-w-6xl space-y-8">
           {/* 最新 */}
-          {isLoading ? <LatestSkeleton /> : latest ? <LatestHighlight item={latest} /> : (
+          {isLoading ? (
+            <LatestSkeleton />
+          ) : latest ? (
+            <LatestHighlight item={latest} />
+          ) : (
             <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-6 text-gray-500 text-sm">
               まだレポートがありません。公開までお待ちください。
             </div>
