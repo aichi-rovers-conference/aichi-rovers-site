@@ -152,6 +152,7 @@ enum EmailStatus {
   FAILED
 }
 
+
 model EmailQueue {
   id            String      @id @default(cuid())
   participantId String
@@ -159,14 +160,34 @@ model EmailQueue {
   to            String
   subject       String
   body          String
+
   status        EmailStatus @default(PENDING)
   error         String?
+
+  // 受付時刻（従来の作成時刻として維持）
   queuedAt      DateTime    @default(now())
+
+  // 送信順序・バックオフ用の “実行予定時刻”
+  scheduledAt   DateTime    @default(now())
+
   sentAt        DateTime?
+
+  // 排他制御（送信中ロック）
+  lockId        String?
+  lockedAt      DateTime?
+
+  //  再試行回数
+  attempts      Int         @default(0)
+
+  // 二重投入防止キー（会×参加者×件名+本文などのハッシュ）
+  idempotencyKey String     @unique @default(uuid())
 
   participant Participant @relation(fields: [participantId], references: [id])
 
+  // 既存indexに加えて scheduledAt/lockedAt で運用を安定化
   @@index([status, queuedAt])
+  @@index([status, scheduledAt])
+  @@index([lockedAt])
   @@index([participantId, meetingCode])
 }
 
