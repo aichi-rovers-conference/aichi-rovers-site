@@ -18,31 +18,31 @@ import {
   CalendarCheck,
 } from "lucide-react";
 
-// 追加：必ずSSRで再評価（ログアウト後の見え残り防止）
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default async function ExecPage() {
-  // ← ここは await が必要
   const cookieStore = await cookies();
   const token = cookieStore.get(COOKIE_NAME)?.value ?? "";
   const session = token ? await verifyToken(token) : null;
-  
 
   if (!session) {
     redirect("/?auth=required");
   }
 
   const isAdmin = session.role === "ADMIN";
-  const isSuper = 
-    session.isSuper === true;
+  const isSuper = session.isSuper === true;
+
+  type Accent = "red" | "amber" | "blue" | "green";
 
   const links: {
     href: string;
     icon: ReactNode;
     title: string;
     desc?: string;
-    accent?: "red" | "amber" | "blue" | "green";
+    accent?: Accent;
+    /** 👇 追加：メンテ時に無効化 */
+    disabled?: boolean;
   }[] = [
     {
       href: "/exec/participants",
@@ -50,6 +50,7 @@ export default async function ExecPage() {
       title: "参加者管理",
       desc: "名簿の追加・検索・所属やRS年齢の編集",
       accent: "red",
+      disabled: !isSuper, // ← isSuper以外は押せない
     },
     {
       href: "/exec/meetings",
@@ -57,6 +58,7 @@ export default async function ExecPage() {
       title: "定例会の管理",
       desc: "定例会の作成・出席管理・集計ダウンロード",
       accent: "amber",
+      disabled: !isSuper, // ← isSuper以外は押せない
     },
     {
       href: "/exec/polls",
@@ -64,21 +66,24 @@ export default async function ExecPage() {
       title: "アンケート管理",
       desc: "アンケートの作成・公開・回答状況の確認",
       accent: "blue",
+      disabled: !isSuper, // ← isSuper以外は押せない
     },
   ];
 
+  // カレンダーは使える（従来ロジックを維持）
   const canEditCalendar = session.role === "ADMIN" || session.role === "EDITOR" || isSuper;
-
-  if(canEditCalendar) {
+  if (canEditCalendar) {
     links.push({
       href: "/exec/calendar",
       icon: <CalendarCheck className="size-6 md:size-7 xl:size-8" />,
       title: "事業カレンダー管理",
       desc: "募集と年間スケジュールの追加・編集・公開設定",
       accent: "red",
+      disabled: false, // ← 常に有効（表示は canEditCalendar 次第）
     });
   }
 
+  // 運営委員管理は isSuper のときだけ表示（従来通り）
   if (isSuper) {
     links.push({
       href: "/exec/CommitteeManage",
@@ -86,6 +91,7 @@ export default async function ExecPage() {
       title: "運営委員管理",
       desc: "ユーザーの登録・権限の管理",
       accent: "green",
+      disabled: false,
     });
   }
 
@@ -94,17 +100,12 @@ export default async function ExecPage() {
     : "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 lg:gap-6 2xl:gap-8";
 
   return (
-    // ✨ 横はみ出しをクリップ
     <div className="min-h-screen bg-gradient-to-b from-white to-gray-50 overflow-x-clip">
       <div className="h-2 w-full bg-gradient-to-r from-violet-400 via-fuchsia-400 to-indigo-400" />
       <ArcHeader />
       <main className="mx-auto px-4 md:px-8 py-10 max-w-7xl xl:max-w-[88rem] 2xl:max-w-[96rem]">
-        {/* ヒーロー */}
-        {/* ✨ 相対配置 + 横はみ出しクリップ */}
         <section className={`${styles.hero} relative overflow-x-clip`}>
-          {/* ✨ 右端内に収める（-right をやめる）。blur のはみ出しも clip で消える */}
           <div className="absolute -top-24 right-0 translate-x-1/4 w-72 h-72 rounded-full bg-red-100 blur-3xl opacity-60 pointer-events-none" />
-
           <div className="relative z-10 flex items-start gap-5">
             <div className="shrink-0 rounded-2xl bg-red-600/90 text-white p-3 md:p-3.5 xl:p-4 shadow">
               <ShieldCheck className="size-7 md:size-8 xl:size-9" />
@@ -125,7 +126,6 @@ export default async function ExecPage() {
           </div>
         </section>
 
-        {/* クイックリンク（列数をロールで切替） */}
         <section className={`mt-10 ${gridClass}`}>
           {links.map((it) => (
             <QuickLink
@@ -135,11 +135,11 @@ export default async function ExecPage() {
               title={it.title}
               desc={it.desc}
               accent={it.accent}
+              disabled={it.disabled}
             />
           ))}
         </section>
 
-        {/* ログアウト */}
         <section className="mt-12">
           <form method="post" action="/api/auth/logout?next=/">
             <button
@@ -156,19 +156,21 @@ export default async function ExecPage() {
   );
 }
 
-/* --------------- サブ：クイックリンクカード --------------- */
+/* --------------- サブ：クイックリンクカード（無効時はdiv＋オーバーレイ） --------------- */
 function QuickLink({
   href,
   icon,
   title,
   desc,
   accent = "red",
+  disabled = false,
 }: {
   href: string;
   icon: ReactNode;
   title: string;
   desc?: string;
   accent?: "red" | "amber" | "blue" | "green";
+  disabled?: boolean;
 }) {
   const accentMap: Record<string, string> = {
     red: "bg-red-50 group-hover:bg-red-100 text-red-700",
@@ -177,20 +179,20 @@ function QuickLink({
     green: "bg-green-50 group-hover:bg-green-100 text-green-700",
   };
 
-  return (
-    <Link
-      href={href}
+  const CardInner = (
+    <div
       className="
-        group block h-full rounded-3xl border border-gray-200/70 bg-white/90 backdrop-blur
+        group relative block h-full rounded-3xl border border-gray-200/70 bg-white/90 backdrop-blur
         p-5 sm:p-6 lg:p-7 2xl:p-8 shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition transform
         min-h-[9rem] lg:min-h-[10.5rem] 2xl:min-h-[12rem]
       "
+      aria-disabled={disabled || undefined}
     >
+      {/* 本体 */}
       <div className="grid grid-cols-[auto,1fr,auto] items-start gap-4 lg:gap-5">
         <div className={`shrink-0 rounded-xl p-3 sm:p-3.5 lg:p-4 ${accentMap[accent]}`}>
           {icon}
         </div>
-
         <div className="min-w-0">
           <h3 className="text-lg sm:text-xl lg:text-2xl 2xl:text-[1.6rem] font-bold text-gray-900 leading-tight">
             {title}
@@ -201,10 +203,28 @@ function QuickLink({
             </p>
           )}
         </div>
-
         <ChevronRight className="size-5 sm:size-6 text-gray-400 group-hover:text-gray-700 transition mt-1" />
       </div>
+
+      {/* 無効時オーバーレイ */}
+      {disabled && (
+        <>
+          <div className="pointer-events-none absolute inset-0 rounded-3xl bg-gray-200/45" />
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <span className="rounded-full bg-gray-900/75 text-white text-xs sm:text-sm px-3 py-1.5 shadow">
+              メンテナンス中
+            </span>
+          </div>
+        </>
+      )}
       <span className="sr-only">Link to {title}</span>
-    </Link>
+    </div>
+  );
+
+  // 有効：リンクとして描画／ 無効：divで描画（遷移なし）
+  return disabled ? (
+    <div className="cursor-not-allowed">{CardInner}</div>
+  ) : (
+    <Link href={href}>{CardInner}</Link>
   );
 }
