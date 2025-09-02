@@ -62,9 +62,6 @@ export default function Home() {
             >
               愛知ローバース会議
             </p>
-            <div className="mt-6 sm:mt-8">
-              <ExecAccessButton mode="inline" label="運営委員専用ページへ" className="px-5 sm:px-6 py-2" />
-            </div>
           </motion.div>
         )}
       </HeroImage>
