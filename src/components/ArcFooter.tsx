@@ -6,8 +6,8 @@ import { FaFacebook, FaInstagram, FaXTwitter, FaLine } from "react-icons/fa6";
 
 type Social = {
   name: "Facebook" | "Instagram" | "X" | "LINE";
-  href?: string;            // 未開設は undefined
-  color: string;            // 色クラス（白基調に合う控えめトーン）
+  href?: string; // 未開設は undefined
+  color: string;
   Icon: React.ComponentType<{ size?: number; className?: string }>;
 };
 
@@ -18,18 +18,8 @@ const SOCIALS: Social[] = [
     color: "text-sky-600 hover:text-sky-500",
     Icon: FaFacebook,
   },
-  {
-    name: "Instagram",
-    href: undefined, // 未開設
-    color: "text-pink-500",
-    Icon: FaInstagram,
-  },
-  {
-    name: "X",
-    href: undefined, // 未開設
-    color: "text-neutral-800",
-    Icon: FaXTwitter,
-  },
+  { name: "Instagram", href: undefined, color: "text-pink-500", Icon: FaInstagram },
+  { name: "X", href: undefined, color: "text-neutral-800", Icon: FaXTwitter },
   {
     name: "LINE",
     href: "https://lin.ee/BPXqTTv",
@@ -67,12 +57,37 @@ function SocialIcon({ s }: { s: Social }) {
   );
 }
 
+/** 🔒 共通：運営委員リンク
+ *  - スマホ（<md）: テキストリンク（控えめ）
+ *  - PC半画面（md～lg）: “ゴースト”ピル（枠のみで可視性↑）
+ *  - PCフルスクリーン（≥xl）: 下線テキスト（最も控えめ）
+ */
+function ExecLink({ className = "" }: { className?: string }) {
+  return (
+    <Link
+      href="/exec"
+      // base: スマホ（テキストリンク）
+      className={[
+        "inline-flex items-center gap-1.5 text-slate-600 underline underline-offset-4 decoration-slate-200 hover:text-slate-900 hover:decoration-slate-700",
+        // md～lg: ピル型（枠だけ・背景なし）
+        "md:no-underline md:px-2.5 md:py-1 md:rounded-full md:border md:border-slate-200 md:hover:border-slate-300",
+        // xl 以上: ふたたびテキストリンク強調（超控えめ）
+        "xl:border-0 xl:px-0 xl:py-0 xl:underline xl:decoration-slate-200 xl:hover:decoration-slate-700",
+        className,
+      ].join(" ")}
+      aria-label="運営委員専用ページ"
+    >
+      <span aria-hidden className="text-[12px] md:text-[11px]">🔒</span>
+      <span>運営委員専用ページ</span>
+    </Link>
+  );
+}
+
 export default function ArcFooter() {
   const year = new Date().getFullYear();
 
   return (
     <footer className="mt-10 text-slate-700 border-t border-gray-200 bg-gradient-to-b from-white to-slate-50">
-      {/* NOTE: ミドルウェアのサインとして使っている虹色ラインはここには出しません */}
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-10">
         {/* PC（md以上）：3カラム */}
         <div className="hidden md:grid grid-cols-12 gap-8 py-10">
@@ -94,7 +109,7 @@ export default function ArcFooter() {
             </div>
           </div>
 
-          {/* 右：リンク */}
+          {/* 右：リンク（PCでも 🔒 を表示） */}
           <nav className="col-span-3">
             <p className="text-sm font-semibold text-slate-900">リンク</p>
             <ul className="mt-3 space-y-2 text-sm">
@@ -106,12 +121,10 @@ export default function ArcFooter() {
                   プライバシーポリシー
                 </Link>
               </li>
-              {/* 利用規約を追加する場合は以下を有効化
               <li>
-                <Link href="/terms" className="text-slate-700 hover:text-slate-900 underline underline-offset-4">
-                  利用規約
-                </Link>
-              </li> */}
+                {/* 🔒 PC表示で消えないように追加（見た目はブレークポイントで自動調整） */}
+                <ExecLink />
+              </li>
             </ul>
           </nav>
         </div>
@@ -132,14 +145,22 @@ export default function ArcFooter() {
             </div>
           </section>
 
-          {/* リンク */}
+          {/* リンク（スマホ：テキストリンク） */}
           <nav className="mt-6 text-center">
-            <Link
-              href="/privacy"
-              className="text-sm text-slate-700 hover:text-slate-900 underline underline-offset-4 decoration-slate-300 hover:decoration-slate-700"
-            >
-              プライバシーポリシー
-            </Link>
+            <ul className="mt-3 space-y-2 text-sm">
+              <li>
+                <Link
+                  href="/privacy"
+                  className="text-slate-700 hover:text-slate-900 underline underline-offset-4 decoration-slate-300 hover:decoration-slate-700"
+                >
+                  プライバシーポリシー
+                </Link>
+              </li>
+              <li>
+                {/* 🔒 スマホは控えめなテキストリンク（共通コンポーネントでOK） */}
+                <ExecLink />
+              </li>
+            </ul>
           </nav>
         </div>
 
