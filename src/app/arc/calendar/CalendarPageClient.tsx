@@ -1,4 +1,4 @@
-// app/arc/calendar/page.tsx
+// src/app/arc/calendar/CalendarPageClient.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -97,7 +97,14 @@ async function safeJson(res: Response) {
   }
 }
 
-export default function CalendarPage() {
+/** 期限切れ判定（JSTの当日23:59:59までを有効扱い） */
+function isExpiredJST(yyyy_mm_dd: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(yyyy_mm_dd || "")) return false;
+  const endOfDayJst = new Date(`${yyyy_mm_dd}T23:59:59+09:00`).getTime();
+  return Date.now() > endOfDayJst;
+}
+
+export default function CalendarPageClient() {
   // ===== ナビ =====
   const navItems = [
     { name: "ホーム", path: "/" },
@@ -112,7 +119,7 @@ export default function CalendarPage() {
   // ===== データ読込 =====
   const [events, setEvents] = useState<EventItem[] | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string>("—");
-  const [recruits, setRecruits] = useState<RecruitingItem[] | null>(null);
+  const [recruitsRaw, setRecruitsRaw] = useState<RecruitingItem[] | null>(null);
   const [recruitsUpdated, setRecruitsUpdated] = useState<string>("—");
 
   useEffect(() => {
@@ -136,7 +143,7 @@ export default function CalendarPage() {
         setLastUpdated("—");
       });
 
-    // 募集（公開 & 締切未到来が返る想定）
+    // 募集（※バックエンドが期限切れを返してしまうケースに備え、クライアント側でもフィルタする）
     fetch(RECRUIT_API_URL, { cache: "no-store" })
       .then(safeJson)
       .then((j) => {
@@ -150,14 +157,22 @@ export default function CalendarPage() {
           urlDesc: x.urlDesc || undefined,
           imageUrl: x.imageUrl || undefined,
         }));
-        setRecruits(data);
+        setRecruitsRaw(data);
         setRecruitsUpdated(j.lastUpdated ? new Date(j.lastUpdated).toLocaleString() : "—");
       })
       .catch(() => {
-        setRecruits([]);
+        setRecruitsRaw([]);
         setRecruitsUpdated("—");
       });
   }, []);
+
+  // ===== 期限切れ除外（公開ページは常に期限切れを非表示） =====
+  const recruits = useMemo(() => {
+    if (!recruitsRaw) return recruitsRaw; // ローディング中は null のまま
+    return recruitsRaw
+      .filter((r) => !isExpiredJST(r.deadline))
+      .sort((a, b) => (a.deadline < b.deadline ? -1 : a.deadline > b.deadline ? 1 : 0));
+  }, [recruitsRaw]);
 
   const byMonth = useMemo(() => groupByMonth(events ?? []), [events]);
 
@@ -166,9 +181,9 @@ export default function CalendarPage() {
       {/* ヘッダー */}
       <ArcHeader1 navItems={navItems} />
 
-      {/* ★ 共通ヒーロー適用 */}
+      {/* 共通ヒーロー */}
       <HeroImage
-        src="/images/R6-3.JPG" // 静的インポートに替えてもOK
+        src="/images/R6-3.JPG"
         alt="Aichi Rovers Conference"
         heightClass="h-[40vh] sm:h-[46vh]"
         parallaxAmount={180}
@@ -195,7 +210,7 @@ export default function CalendarPage() {
         </motion.div>
       </HeroImage>
 
-      {/* 現在募集中の案内 */}
+      {/* 現在募集中の案内（期限切れは常に非表示） */}
       <section className="w-full bg-white py-10 sm:py-12 md:py-14 px-4 sm:px-6 md:px-10 lg:px-16">
         <div className="mx-auto max-w-6xl">
           <h2
@@ -218,45 +233,42 @@ export default function CalendarPage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              {recruits
-                .slice()
-                .sort((a, b) => (a.deadline < b.deadline ? -1 : a.deadline > b.deadline ? 1 : 0))
-                .map((r) => (
-                  <article key={r.id} className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-                    {r.imageUrl ? (
-                      <div className="relative h-40 sm:h-48">
-                        {/* 外部画像を使う場合は next.config に remotePatterns を追加してください */}
-                        <Image src={r.imageUrl} alt={r.title} fill className="object-cover" />
-                      </div>
-                    ) : null}
-                    <div className="p-4 sm:p-5">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-700 border border-rose-200">
-                          締切：{r.deadline}
-                        </span>
-                        <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2 py-0.5 text-xs font-semibold text-sky-700 border border-sky-200">
-                          実施：{r.date}
-                        </span>
-                        <span className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-700 border border-slate-200">
-                          {r.area}
-                        </span>
-                      </div>
-                      <h3 className="mt-2 text-base sm:text-lg font-bold text-gray-900">{r.title}</h3>
-                      {r.url && (
-                        <div className="mt-2 text-sm">
-                          <a
-                            className="text-blue-700 underline underline-offset-2 hover:no-underline"
-                            href={r.url}
-                            target={r.url.startsWith("http") ? "_blank" : undefined}
-                            rel={r.url.startsWith("http") ? "noopener noreferrer" : undefined}
-                          >
-                            {r.urlDesc?.trim() ? r.urlDesc : "開催要項・詳細"}
-                          </a>
-                        </div>
-                      )}
+              {recruits.map((r) => (
+                <article key={r.id} className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+                  {r.imageUrl ? (
+                    <div className="relative h-40 sm:h-48">
+                      {/* 外部画像を使う場合は next.config に remotePatterns を追加してください */}
+                      <Image src={r.imageUrl} alt={r.title} fill className="object-cover" />
                     </div>
-                  </article>
-                ))}
+                  ) : null}
+                  <div className="p-4 sm:p-5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-700 border border-rose-200">
+                        締切：{r.deadline}
+                      </span>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2 py-0.5 text-xs font-semibold text-sky-700 border border-sky-200">
+                        実施：{r.date}
+                      </span>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-700 border border-slate-200">
+                        {r.area}
+                      </span>
+                    </div>
+                    <h3 className="mt-2 text-base sm:text-lg font-bold text-gray-900">{r.title}</h3>
+                    {r.url && (
+                      <div className="mt-2 text-sm">
+                        <a
+                          className="text-blue-700 underline underline-offset-2 hover:no-underline"
+                          href={r.url}
+                          target={r.url.startsWith("http") ? "_blank" : undefined}
+                          rel={r.url.startsWith("http") ? "noopener noreferrer" : undefined}
+                        >
+                          {r.urlDesc?.trim() ? r.urlDesc : "開催要項・詳細"}
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                </article>
+              ))}
             </div>
           )}
 
@@ -276,7 +288,7 @@ export default function CalendarPage() {
           >
             年間スケジュール
           </h2>
-          <div className="mt-2 h-[2px] w-16 bg-red-600 rounded-full" />
+        <div className="mt-2 h-[2px] w-16 bg-red-600 rounded-full" />
 
           {events === null ? (
             <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
