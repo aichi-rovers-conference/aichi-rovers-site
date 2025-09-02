@@ -1,6 +1,6 @@
-// app/api/participants/route.ts
+// src/app/api/participants/route.ts
 import { NextResponse } from "next/server";
-import { prisma } from "../../../../lib/prisma";
+import * as PrismaLib from "@/lib/prisma"; // prisma / prisma2 / writeClients を任意で export しておく
 import { District as DistrictEnum, Prisma } from "@prisma/client";
 import { rebuildMeetingSheet } from "@/src/lib/buildMeetingSheet";
 
@@ -8,7 +8,18 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const runtime = "nodejs";
 
-// 日本語ラベル <-> Enum
+/** lib/prisma 側の export を吸収して、書き込み対象クライアント配列を構築 */
+function getWriteClients(): any[] {
+  const clients: any[] = [];
+  const anyLib: any = PrismaLib as any;
+  if (anyLib.prisma) clients.push(anyLib.prisma);
+  if (anyLib.prisma2) clients.push(anyLib.prisma2);
+  if (Array.isArray(anyLib.writeClients)) clients.push(...anyLib.writeClients);
+  // 重複除去（同一参照）念のため
+  return Array.from(new Set(clients));
+}
+
+/** 日本語ラベル <-> Enum */
 const LABEL_BY_ENUM: Record<DistrictEnum, string> = {
   [DistrictEnum.NAGOYA_CHIKUSA]: "名古屋千種地区",
   [DistrictEnum.NAGOYA_SEIBU]:   "名古屋西部地区",
@@ -32,7 +43,7 @@ const ENUM_BY_LABEL: Record<string, DistrictEnum> =
 function parseDistrictParam(input?: string | null): DistrictEnum | undefined {
   if (!input) return undefined;
   const s = String(input).trim();
-  if ((Object.keys(LABEL_BY_ENUM) as string[]).includes(s)) return s as DistrictEnum; // Enum記号
+  if ((Object.keys(LABEL_BY_ENUM) as string[]).includes(s)) return s as DistrictEnum; // Enumキー
   if (ENUM_BY_LABEL[s]) return ENUM_BY_LABEL[s]; // 日本語ラベル
   return undefined;
 }
@@ -50,6 +61,7 @@ function toDTO(p: any) {
   };
 }
 
+// ======================== GET ========================
 // GET /api/participants?district=...&q=...&limit=50&hasEmail=true
 export async function GET(req: Request) {
   try {
@@ -67,7 +79,7 @@ export async function GET(req: Request) {
     if (districtEnum) where.district = districtEnum;
 
     if (q) {
-      // ※ あなたの Prisma 型では email/name/troop の filter に mode が無いようなので、純粋な contains のみ
+      // Email/Name/Troop を部分一致（mode 指定なし）
       where.OR = [
         { name:  { contains: q } },
         { troop: { contains: q } },
@@ -87,7 +99,13 @@ export async function GET(req: Request) {
       else where.AND = andParts;
     }
 
-    const items = await prisma.participant.findMany({
+    // 読み取りは第一クライアント優先（複数DBの整合は運用ポリシーに依存）
+    const [primary] = getWriteClients();
+    if (!primary) {
+      return NextResponse.json({ items: [], error: "NO_DB_CLIENT" }, { status: 500 });
+    }
+
+    const items = await primary.participant.findMany({
       where,
       orderBy: [{ name: "asc" }],
       take: limit,
@@ -102,7 +120,8 @@ export async function GET(req: Request) {
   }
 }
 
-// POST /api/participants  { name, troop, rsAge, district, email? }
+// ======================== POST ========================
+// POST /api/participants { name, troop, rsAge, district, email? }
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
@@ -113,30 +132,69 @@ export async function POST(req: Request) {
     const emailRaw = (body?.email == null ? null : String(body.email).trim()) || null;
 
     if (!name || !troop || !Number.isFinite(rsAge) || !districtEnum) {
-      return NextResponse.json({ error: "invalid payload" }, { status: 400 });
+      return NextResponse.json({ ok: false, error: "INVALID_PAYLOAD" }, { status: 400 });
     }
     if (emailRaw && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailRaw)) {
-      return NextResponse.json({ error: "invalid email" }, { status: 400 });
+      return NextResponse.json({ ok: false, error: "INVALID_EMAIL" }, { status: 400 });
     }
 
-    const p = await prisma.participant.create({
-      data: { name, troop, rsAge, district: districtEnum, email: emailRaw },
-    });
+    const clients = getWriteClients();
+    if (!clients.length) {
+      return NextResponse.json({ ok: false, error: "NO_DB_CLIENT" }, { status: 500 });
+    }
 
+    // ---- まず第一DBに作成（正準DB）----
+    let created: any | null = null;
+    try {
+      created = await clients[0].participant.create({
+        data: { name, troop, rsAge, district: districtEnum, email: emailRaw },
+      });
+    } catch (e: any) {
+      if (e?.code === "P2002") {
+        return NextResponse.json(
+          { ok: false, error: "DUPLICATE", message: "email is already registered" },
+          { status: 409 },
+        );
+      }
+      throw e;
+    }
+
+    // ---- 残りのDBにもベストエフォートで反映（存在すれば）----
+    // 同一emailの unique 制約競合はスキップ（ログのみ）
+    await Promise.all(
+      clients.slice(1).map(async (c, idx) => {
+        try {
+          await c.participant.create({
+            data: {
+              id: created.id, // 同一IDで複製したい場合（※DB設定によっては不要/不可なら外してください）
+              name,
+              troop,
+              rsAge,
+              district: districtEnum,
+              email: emailRaw,
+              createdAt: created.createdAt,
+              updatedAt: created.updatedAt,
+            },
+          });
+        } catch (e: any) {
+          if (e?.code === "P2002") {
+            console.warn(`[POST /participants] secondary#${idx} duplicate email, skip`);
+            return;
+          }
+          console.error(`[POST /participants] secondary#${idx} write failed:`, e);
+        }
+      })
+    );
+
+    // ---- 付随処理（失敗しても登録自体は成功扱い）----
     try {
       await rebuildMeetingSheet();
     } catch (rebuildErr) {
       console.error("rebuildMeetingSheet failed:", rebuildErr);
     }
 
-    return NextResponse.json({ ok: true, item: toDTO(p) }, { status: 201 });
+    return NextResponse.json({ ok: true, item: toDTO(created) }, { status: 201 });
   } catch (e: any) {
-    if (e?.code === "P2002") {
-      return NextResponse.json(
-        { ok: false, error: "DUPLICATE", message: "email is already registered" },
-        { status: 409 },
-      );
-    }
     return NextResponse.json(
       { ok: false, error: e?.code || "SERVER_ERROR", message: e?.message || String(e) },
       { status: 500 },

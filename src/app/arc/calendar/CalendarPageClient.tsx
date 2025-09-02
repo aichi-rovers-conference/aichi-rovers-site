@@ -17,17 +17,19 @@ type EventItem = {
   url?: string;
   note?: string;
   area?: string;
+  isPublished?: boolean; // ★ 追加
 };
 
 type RecruitingItem = {
   id: string;
   title: string;
-  date: string; // 実施日
-  deadline: string; // 参加期限
+  date: string;      // 実施日
+  deadline: string;  // 参加期限
   area: string;
   url?: string;
   urlDesc?: string;
   imageUrl?: string;
+  isPublished?: boolean; // ★ 追加
 };
 
 function groupByMonth(events: EventItem[]) {
@@ -117,14 +119,15 @@ export default function CalendarPageClient() {
   ];
 
   // ===== データ読込 =====
-  const [events, setEvents] = useState<EventItem[] | null>(null);
+  const [eventsRaw, setEventsRaw] = useState<EventItem[] | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string>("—");
   const [recruitsRaw, setRecruitsRaw] = useState<RecruitingItem[] | null>(null);
   const [recruitsUpdated, setRecruitsUpdated] = useState<string>("—");
 
   useEffect(() => {
     const y = new Date().getFullYear();
-    // 年間スケジュール
+
+    // 年間スケジュール（公開フラグも取得）
     fetch(`${EVENTS_API_URL}?year=${y}`, { cache: "no-store" })
       .then(safeJson)
       .then((j) => {
@@ -134,16 +137,18 @@ export default function CalendarPageClient() {
           url: x.url || undefined,
           note: x.note || undefined,
           area: x.area || undefined,
+          // ★ isPublished が未定義の場合は「trueとみなす」→過去データ互換
+          isPublished: x?.isPublished !== false,
         }));
-        setEvents(data);
+        setEventsRaw(data);
         setLastUpdated(j.lastUpdated ? new Date(j.lastUpdated).toLocaleString() : "—");
       })
       .catch(() => {
-        setEvents([]);
+        setEventsRaw([]);
         setLastUpdated("—");
       });
 
-    // 募集（※バックエンドが期限切れを返してしまうケースに備え、クライアント側でもフィルタする）
+    // 募集（公開フラグも取得）
     fetch(RECRUIT_API_URL, { cache: "no-store" })
       .then(safeJson)
       .then((j) => {
@@ -156,6 +161,8 @@ export default function CalendarPageClient() {
           url: x.url || undefined,
           urlDesc: x.urlDesc || undefined,
           imageUrl: x.imageUrl || undefined,
+          // ★ 同じく未定義は true と扱う
+          isPublished: x?.isPublished !== false,
         }));
         setRecruitsRaw(data);
         setRecruitsUpdated(j.lastUpdated ? new Date(j.lastUpdated).toLocaleString() : "—");
@@ -166,10 +173,18 @@ export default function CalendarPageClient() {
       });
   }, []);
 
-  // ===== 期限切れ除外（公開ページは常に期限切れを非表示） =====
+  // ===== 公開ページの表示用フィルタ =====
+  // イベント：isPublished が false のものを除外
+  const events = useMemo(() => {
+    if (!eventsRaw) return eventsRaw;
+    return eventsRaw.filter((e) => e.isPublished !== false);
+  }, [eventsRaw]);
+
+  // 募集：isPublished が false／期限切れを除外
   const recruits = useMemo(() => {
-    if (!recruitsRaw) return recruitsRaw; // ローディング中は null のまま
+    if (!recruitsRaw) return recruitsRaw;
     return recruitsRaw
+      .filter((r) => r.isPublished !== false)
       .filter((r) => !isExpiredJST(r.deadline))
       .sort((a, b) => (a.deadline < b.deadline ? -1 : a.deadline > b.deadline ? 1 : 0));
   }, [recruitsRaw]);
@@ -210,7 +225,7 @@ export default function CalendarPageClient() {
         </motion.div>
       </HeroImage>
 
-      {/* 現在募集中の案内（期限切れは常に非表示） */}
+      {/* 現在募集中の案内（公開のみ／期限切れ非表示） */}
       <section className="w-full bg-white py-10 sm:py-12 md:py-14 px-4 sm:px-6 md:px-10 lg:px-16">
         <div className="mx-auto max-w-6xl">
           <h2
@@ -272,14 +287,13 @@ export default function CalendarPageClient() {
             </div>
           )}
 
-          {/* 任意：更新時刻（必要なら表示） */}
           {recruits && (
             <div className="mt-4 text-[12px] sm:text-xs text-gray-500">募集情報 最終更新：{recruitsUpdated}</div>
           )}
         </div>
       </section>
 
-      {/* 年間スケジュール */}
+      {/* 年間スケジュール（公開のみ） */}
       <section className="w-full bg-white pb-10 sm:pb-12 md:pb-14 px-4 sm:px-6 md:px-10 lg:px-16">
         <div className="mx-auto max-w-6xl">
           <h2
@@ -288,7 +302,7 @@ export default function CalendarPageClient() {
           >
             年間スケジュール
           </h2>
-        <div className="mt-2 h-[2px] w-16 bg-red-600 rounded-full" />
+          <div className="mt-2 h-[2px] w-16 bg-red-600 rounded-full" />
 
           {events === null ? (
             <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">

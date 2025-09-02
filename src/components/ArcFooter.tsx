@@ -57,21 +57,14 @@ function SocialIcon({ s }: { s: Social }) {
   );
 }
 
-/** 🔒 共通：運営委員リンク
- *  - スマホ（<md）: テキストリンク（控えめ）
- *  - PC半画面（md～lg）: “ゴースト”ピル（枠のみで可視性↑）
- *  - PCフルスクリーン（≥xl）: 下線テキスト（最も控えめ）
- */
+/** 🔒 共通：運営委員リンク */
 function ExecLink({ className = "" }: { className?: string }) {
   return (
     <Link
       href="/exec"
-      // base: スマホ（テキストリンク）
       className={[
         "inline-flex items-center gap-1.5 text-slate-600 underline underline-offset-4 decoration-slate-200 hover:text-slate-900 hover:decoration-slate-700",
-        // md～lg: ピル型（枠だけ・背景なし）
         "md:no-underline md:px-2.5 md:py-1 md:rounded-full md:border md:border-slate-200 md:hover:border-slate-300",
-        // xl 以上: ふたたびテキストリンク強調（超控えめ）
         "xl:border-0 xl:px-0 xl:py-0 xl:underline xl:decoration-slate-200 xl:hover:decoration-slate-700",
         className,
       ].join(" ")}
@@ -93,7 +86,9 @@ export default function ArcFooter() {
         <div className="hidden md:grid grid-cols-12 gap-8 py-10">
           {/* 左：ブランド/説明 */}
           <div className="col-span-5 self-center">
-            <div className="text-xl font-bold tracking-tight text-slate-900">Aichi Rovers Conference</div>
+            <div className="text-xl font-bold tracking-tight text-slate-900">
+              Aichi Rovers Conference
+            </div>
             <p className="mt-2 text-sm text-slate-500">
               愛知連盟ローバース会議の公式サイト。行事の参加管理、QR受付、アーカイブ等を提供しています。
             </p>
@@ -109,10 +104,10 @@ export default function ArcFooter() {
             </div>
           </div>
 
-          {/* 右：リンク（PCでも 🔒 を表示） */}
+          {/* 右：リンク */}
           <nav className="col-span-3">
             <p className="text-sm font-semibold text-slate-900">リンク</p>
-            <ul className="mt-3 space-y-2 text-sm">
+            <ul className="mt-3 space-y-3 text-sm">
               <li>
                 <Link
                   href="/privacy"
@@ -122,18 +117,30 @@ export default function ArcFooter() {
                 </Link>
               </li>
               <li>
-                {/* 🔒 PC表示で消えないように追加（見た目はブレークポイントで自動調整） */}
+                {/* ✅ 強調ボタン風 */}
+                <Link
+                  href="/arc/register"
+                  className="inline-block w-full rounded-full bg-indigo-600 px-4 py-2 text-center font-semibold text-white shadow hover:bg-indigo-500 hover:shadow-md transition"
+                >
+                  参加者登録はこちら
+                </Link>
+              </li>
+              <li>
                 <ExecLink />
               </li>
             </ul>
           </nav>
         </div>
 
-        {/* モバイル（~md未満）：スタック */}
+        {/* モバイル（~md未満） */}
         <div className="md:hidden py-8">
           <div className="text-center">
-            <div className="text-lg font-bold tracking-tight text-slate-900">Aichi Rovers Conference</div>
-            <p className="mt-2 text-xs text-slate-500">行事の参加管理、QR受付、アーカイブ等を提供しています。</p>
+            <div className="text-lg font-bold tracking-tight text-slate-900">
+              Aichi Rovers Conference
+            </div>
+            <p className="mt-2 text-xs text-slate-500">
+              行事の参加管理、QR受付、アーカイブ等を提供しています。
+            </p>
           </div>
 
           {/* SNS */}
@@ -145,9 +152,9 @@ export default function ArcFooter() {
             </div>
           </section>
 
-          {/* リンク（スマホ：テキストリンク） */}
+          {/* リンク（スマホ） */}
           <nav className="mt-6 text-center">
-            <ul className="mt-3 space-y-2 text-sm">
+            <ul className="mt-3 space-y-3 text-sm">
               <li>
                 <Link
                   href="/privacy"
@@ -157,7 +164,15 @@ export default function ArcFooter() {
                 </Link>
               </li>
               <li>
-                {/* 🔒 スマホは控えめなテキストリンク（共通コンポーネントでOK） */}
+                {/* ✅ スマホでもボタン風で強調 */}
+                <Link
+                  href="/arc/register"
+                  className="inline-block w-full rounded-full bg-indigo-600 px-4 py-2 font-semibold text-white shadow hover:bg-indigo-500 hover:shadow-md transition"
+                >
+                  参加者登録はこちら
+                </Link>
+              </li>
+              <li>
                 <ExecLink />
               </li>
             </ul>
@@ -166,7 +181,9 @@ export default function ArcFooter() {
 
         {/* コピーライト */}
         <div className="border-t border-gray-200 py-4 text-center">
-          <p className="text-xs sm:text-sm text-slate-500">&copy; {year} Aichi Rovers Conference. All rights reserved.</p>
+          <p className="text-xs sm:text-sm text-slate-500">
+            &copy; {year} Aichi Rovers Conference. All rights reserved.
+          </p>
         </div>
       </div>
     </footer>
