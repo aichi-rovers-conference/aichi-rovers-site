@@ -70,8 +70,8 @@ export default function RegisterParticipantPage() {
       setMessage({ type: "error", text: "必須項目を入力してください。" });
       return;
     }
-    if (typeof rsAge === "number" && (rsAge < 10 || rsAge > 99)) {
-      setMessage({ type: "error", text: "RS年齢は 10〜99 の範囲で入力してください。" });
+    if (typeof rsAge !== "number" || Number.isNaN(rsAge)) {
+      setMessage({ type: "error", text: "RS年齢は数値で入力してください。" });
       return;
     }
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
