@@ -202,7 +202,7 @@ export default function Home() {
               {[
                 { href: "/files/ARC憲章R3年度版.pdf", label: "愛知ローバース会議 憲章" },
                 { href: "/files/令和7年度愛知ローバース会議年次総会資料.pdf", label: "R7年度ARC総会資料" },
-                { href: "/files/友情シールプロジェクト_フライヤー.pdf", label: "友情シールプロジェクト" },
+                { href: "/files/FriendshipStickerProject_Flyer.pdf", label: "友情シールプロジェクト" },
               ].map((item) => (
                 <li key={item.href}>
                   <motion.a
