@@ -118,7 +118,7 @@ export default function ExecCommitteePage() {
     { name: "ARC定例会", path: "/arc/conference" },
     { name: "ARC運営委員会", path: "/arc/executive-committee" },
     { name: "ARCアンケート", path: "/polls" },
-    { name: "ミニゲーム", path: "/games" },
+    // { name: "ミニゲーム", path: "/games" },
   ];
 
   // データ読込
