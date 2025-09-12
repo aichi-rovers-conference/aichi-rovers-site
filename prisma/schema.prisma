@@ -81,6 +81,7 @@ model MeetingReport {
 model CalendarEvent {
   id         String   @id @default(cuid())
   date       DateTime // JSTの 00:00 を推奨（下記APIでJST→UTC変換）
+  endDate    DateTime? //終了日
   title      String
   url        String?
   note       String?
@@ -97,6 +98,7 @@ model Recruiting {
   id          String   @id @default(cuid())
   title       String
   date        DateTime        // 実施日（JST 00:00 保存）
+  endDate     DateTime?       // 実施終了日
   deadline    DateTime        // 参加期限（JST 00:00 保存）
   area        String
   url         String?
