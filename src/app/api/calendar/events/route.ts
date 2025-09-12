@@ -1,7 +1,7 @@
 // app/api/calendar/events/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import prisma from "@/lib/prisma"; // NOTE: named exportなら { prisma } に
+import prisma from "@/lib/prisma";
 import { verifyToken, COOKIE_NAME } from "@/lib/auth";
 
 export const runtime = "nodejs";
@@ -32,9 +32,16 @@ function jstDateOnly(s: string): Date {
   return new Date(`${t}T00:00:00+09:00`);
 }
 
+// DateをJSTのYYYY-MM-DDに整形（undefined可）
+function toJstYmd(d?: Date | null): string | undefined {
+  if (!d) return undefined;
+  const t = d.getTime() + 9 * 60 * 60 * 1000;
+  return new Date(t).toISOString().slice(0, 10);
+}
+
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
-  const year = url.searchParams.get("year"); // 例: "2025"
+  const year = url.searchParams.get("year"); // 例: "2026"
   const includeUnpublished = url.searchParams.get("all") === "1";
 
   const where: any = {};
@@ -52,11 +59,24 @@ export async function GET(req: NextRequest) {
     orderBy: [{ date: "asc" }, { createdAt: "asc" }],
   });
 
-  // lastUpdated を updatedAt の最大で返す
   const lastUpdated =
     rows.reduce<Date | null>((acc, r) => (!acc || r.updatedAt > acc ? r.updatedAt : acc), null)?.toISOString() ?? null;
 
-  return NextResponse.json({ items: rows, lastUpdated });
+  // ★ ここでJST日付に整形して返す（前端はslice不要＆時差事故なし）
+  const items = rows.map((r) => ({
+    id: r.id,
+    date: toJstYmd(r.date)!,                              // "YYYY-MM-DD"
+    endDate: toJstYmd((r as any).endDate ?? r.date),      // 期間対応／未設定は開始日
+    title: r.title,
+    url: r.url ?? undefined,
+    note: r.note ?? undefined,
+    area: r.area ?? undefined,
+    isPublished: r.isPublished,
+    createdAt: r.createdAt.toISOString(),
+    updatedAt: r.updatedAt.toISOString(),
+  }));
+
+  return NextResponse.json({ items, lastUpdated });
 }
 
 export async function POST(req: NextRequest) {
@@ -64,7 +84,7 @@ export async function POST(req: NextRequest) {
   if (!me) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body = await req.json().catch(() => ({} as any));
-  const { date, title, url, note, area, isPublished = true } = body ?? {};
+  const { date, endDate, title, url, note, area, isPublished = true } = body ?? {};
 
   if (!date || !title) return NextResponse.json({ error: "必須項目が未入力です" }, { status: 400 });
 
@@ -72,6 +92,8 @@ export async function POST(req: NextRequest) {
     const row = await prisma.calendarEvent.create({
       data: {
         date: jstDateOnly(date),
+        // endDateは任意
+        ...(endDate ? { endDate: jstDateOnly(endDate) } : {}),
         title: String(title).trim(),
         url: url ? String(url).trim() : null,
         note: note ? String(note).trim() : null,

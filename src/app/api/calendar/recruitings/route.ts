@@ -23,17 +23,24 @@ async function getSession(): Promise<Session | null> {
   return s ? (s as Session) : null;
 }
 
-// "2025-09-01" → Date("2025-09-01T00:00:00+09:00")
+// "2025-09-01" -> JST 00:00
 function jstDateOnly(s: string): Date {
   const t = String(s ?? "").trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) throw new Error("不正な日付形式です（YYYY-MM-DD）");
   return new Date(`${t}T00:00:00+09:00`);
 }
 
+// Date -> JST "YYYY-MM-DD"
+function toJstYmd(d?: Date | null): string | undefined {
+  if (!d) return undefined;
+  const t = d.getTime() + 9 * 60 * 60 * 1000;
+  return new Date(t).toISOString().slice(0, 10);
+}
+
 // 今日(JST)の00:00
 function jstToday00(): Date {
   const now = Date.now();
-  const jst = new Date(now + 9 * 60 * 60 * 1000); // JST=UTC+9
+  const jst = new Date(now + 9 * 60 * 60 * 1000);
   const y = jst.getUTCFullYear();
   const m = String(jst.getUTCMonth() + 1).padStart(2, "0");
   const d = String(jst.getUTCDate()).padStart(2, "0");
@@ -41,21 +48,18 @@ function jstToday00(): Date {
 }
 
 export async function GET(req: NextRequest) {
-  const me = await getSession(); // ログインしていれば取得
+  const me = await getSession();
   const url = new URL(req.url);
-  const includeUnpublished = url.searchParams.get("all") === "1"; // 明示指定
+  const includeUnpublished = url.searchParams.get("all") === "1";
   const where: any = {};
 
   if (me?.role === "ADMIN" || me?.role === "EDITOR" || me?.isSuper) {
-    // 編集者：?all=1 のときはフィルタ無し。デフォは全部返す（期限切れも含める）
     if (!includeUnpublished) {
-      // 既定でも全部返すが、もし公開のみにしたければ以下を有効化
-      // where.isPublished = true;
+      // where.isPublished = true; // 必要なら開ける
     }
   } else {
-    // 一般公開：公開 & 期限切れ除外
     where.isPublished = true;
-    where.deadline = { gte: jstToday00() }; // 当日00:00以降を表示（締切当日は表示される）
+    where.deadline = { gte: jstToday00() };
   }
 
   const rows = await prisma.recruiting.findMany({
@@ -66,17 +70,32 @@ export async function GET(req: NextRequest) {
   const lastUpdated =
     rows.reduce<Date | null>((acc, r) => (!acc || r.updatedAt > acc ? r.updatedAt : acc), null)?.toISOString() ?? null;
 
-  return NextResponse.json({ items: rows, lastUpdated });
+  // ★ JST "YYYY-MM-DD"で返却
+  const items = rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    date: toJstYmd(r.date)!,                                   // 開始
+    endDate: toJstYmd((r as any).endDate ?? r.date),           // 終了（未設定は開始）
+    deadline: toJstYmd(r.deadline)!,                           // 締切
+    area: r.area,
+    url: r.url ?? undefined,
+    urlDesc: r.urlDesc ?? undefined,
+    imageUrl: r.imageUrl ?? undefined,
+    isPublished: r.isPublished,
+    createdAt: r.createdAt.toISOString(),
+    updatedAt: r.updatedAt.toISOString(),
+  }));
+
+  return NextResponse.json({ items, lastUpdated });
 }
 
 export async function POST(req: NextRequest) {
-  // 追加は編集者のみ
   const me = await getSession();
   const ok = me && (me.role === "ADMIN" || me.role === "EDITOR" || me.isSuper);
   if (!ok) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const b = await req.json().catch(() => ({} as any));
-  const { title, date, deadline, area, url, urlDesc, imageUrl, isPublished = true } = b ?? {};
+  const { title, date, endDate, deadline, area, url, urlDesc, imageUrl, isPublished = true } = b ?? {};
 
   if (!title?.trim() || !date || !deadline || !area?.trim()) {
     return NextResponse.json({ error: "必須項目が未入力です" }, { status: 400 });
@@ -87,6 +106,7 @@ export async function POST(req: NextRequest) {
       data: {
         title: String(title).trim(),
         date: jstDateOnly(date),
+        ...(endDate ? { endDate: jstDateOnly(endDate) } : {}),
         deadline: jstDateOnly(deadline),
         area: String(area).trim(),
         url: url ? String(url).trim() : null,
