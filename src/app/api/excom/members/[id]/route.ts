@@ -1,8 +1,10 @@
+// src/app/api/excom/members/[id]/route.ts
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { cookies } from "next/headers";
 import { verifyToken, COOKIE_NAME } from "@/lib/auth";
 
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -11,9 +13,7 @@ function canWrite(session: any) {
   return role === "ADMIN" || role === "EDITOR";
 }
 
-type Context = { params: { id: string } };
-
-export async function PUT(req: Request, { params }: Context) {
+export async function PUT(req: Request, context: any) {
   const cookieStore = await cookies();
   const token = cookieStore.get(COOKIE_NAME)?.value ?? "";
   const session = token ? await verifyToken(token) : null;
@@ -21,8 +21,10 @@ export async function PUT(req: Request, { params }: Context) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
+  const { id } = (context?.params ?? {}) as { id: string };
+  if (!id) return NextResponse.json({ error: "missing id" }, { status: 400 });
+
   const body = await req.json();
-  const { id } = params;
 
   const updated = await prisma.executiveMember.update({
     where: { id },
@@ -33,7 +35,7 @@ export async function PUT(req: Request, { params }: Context) {
       birthDate: body.birthDate ? new Date(body.birthDate) : null,
       hometown: body.hometown ?? null,
       photoUrl: body.photoUrl ?? null,
-      extras: body.extras ?? null,
+      extras: body.extras ?? null, // Record<string,string> | null を想定
       order: typeof body.order === "number" ? body.order : 0,
       isPublished: typeof body.isPublished === "boolean" ? body.isPublished : true,
     },
@@ -42,7 +44,7 @@ export async function PUT(req: Request, { params }: Context) {
   return NextResponse.json(updated);
 }
 
-export async function DELETE(_req: Request, { params }: Context) {
+export async function DELETE(_req: Request, context: any) {
   const cookieStore = await cookies();
   const token = cookieStore.get(COOKIE_NAME)?.value ?? "";
   const session = token ? await verifyToken(token) : null;
@@ -50,8 +52,9 @@ export async function DELETE(_req: Request, { params }: Context) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
-  const { id } = params;
-  await prisma.executiveMember.delete({ where: { id } });
+  const { id } = (context?.params ?? {}) as { id: string };
+  if (!id) return NextResponse.json({ error: "missing id" }, { status: 400 });
 
+  await prisma.executiveMember.delete({ where: { id } });
   return NextResponse.json({ ok: true });
 }
