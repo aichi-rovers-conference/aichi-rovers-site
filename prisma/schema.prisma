@@ -1,11 +1,294 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
 
-generator client {
-  provider = "prisma-client-js"
+model ExecutiveMember {
+  id String @id @default(cuid())
+  name String
+  unit String
+  role String?
+  birthDate DateTime?
+  hometown String?
+  photoUrl String?
+  extras Json? // { favorites, motto, boom, goal, message } 等を任意で保持
+  order Int @default(0) // 表示順（小さいほど上）
+  isPublished Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model GameScore {
+  id        String   @id @default(cuid())
+  game      String
+  name      String
+  score     Int
+  movesUsed Int?
+  createdAt DateTime @default(now())
+
+  @@index([game, score])
+}
+
+model MeetingReport {
+  id                Int       @id @default(autoincrement())
+  slug              String    @unique
+  title             String
+  date              DateTime
+  fiscalYear        Int
+  round             Int
+  isPublished       Boolean   @default(false)
+  publishedAt       DateTime?
+  coverUrl          String?
+  youtubeId         String?
+  reportUrl         String?
+  subtitle          String?
+  lead              String?
+  schedule          Json?
+  sections          Json?
+  pageGallery       Json?
+  pageGalleryLayout String?
+  groups            Json?
+  sectionsGroups    Json?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @default(now()) @updatedAt
+
+  @@unique([fiscalYear, round], name: "fiscalYear_round")
+}
+
+model CalendarEvent {
+  id          String    @id @default(cuid())
+  date        DateTime
+  endDate     DateTime?
+  title       String
+  url         String?
+  note        String?
+  area        String?
+  isPublished Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([date, isPublished])
+}
+
+model Recruiting {
+  id          String    @id @default(cuid())
+  title       String
+  date        DateTime
+  endDate     DateTime?
+  deadline    DateTime
+  area        String
+  url         String?
+  urlDesc     String?
+  imageUrl    String?
+  isPublished Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([deadline, isPublished])
+  @@index([date])
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  passwordHash String
+  role         Role     @default(EDITOR)
+  isActive     Boolean  @default(true)
+  isSuper      Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Participant {
+  id          String       @id @default(cuid())
+  name        String
+  troop       String
+  rsAge       Int
+  district    District
+  email       String?      @unique
+  createdAt   DateTime     @default(now())
+  attendance  Attendance[]
+  emailQueues EmailQueue[]
+  emailTokens EmailToken[]
+}
+
+model EmailQueue {
+  id             String      @id @default(cuid())
+  participantId  String
+  meetingCode    String
+  to             String
+  subject        String
+  body           String
+  status         EmailStatus @default(PENDING)
+  error          String?
+  queuedAt       DateTime    @default(now())
+  scheduledAt    DateTime    @default(now())
+  sentAt         DateTime?
+  lockId         String?
+  lockedAt       DateTime?
+  attempts       Int         @default(0)
+  idempotencyKey String      @unique @default(uuid())
+  participant    Participant @relation(fields: [participantId], references: [id])
+
+  @@index([status, queuedAt])
+  @@index([status, scheduledAt])
+  @@index([lockedAt])
+  @@index([participantId, meetingCode])
+}
+
+model EmailToken {
+  id            String      @id @default(cuid())
+  token         String      @unique
+  participantId String
+  meetingCode   String
+  expiresAt     DateTime
+  usedAt        DateTime?
+  participant   Participant @relation(fields: [participantId], references: [id])
+
+  @@index([participantId, meetingCode])
+}
+
+model MeetingSheet {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  data      Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Meeting {
+  id         String       @id @default(cuid())
+  title      String
+  date       DateTime
+  reiwa      Int
+  seq        Int
+  code       String       @unique
+  createdAt  DateTime     @default(now())
+  attendance Attendance[]
+
+  @@unique([reiwa, seq])
+  @@index([reiwa, seq])
+  @@index([date])
+}
+
+model Attendance {
+  id            String      @id @default(cuid())
+  meetingId     String
+  participantId String
+  checkedAt     DateTime    @default(now())
+  via           String?
+  meeting       Meeting     @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  participant   Participant @relation(fields: [participantId], references: [id])
+
+  @@unique([meetingId, participantId])
+  @@index([meetingId, checkedAt])
+}
+
+model Poll {
+  id          String       @id @default(cuid())
+  title       String
+  desc        String?
+  isPublic    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  closesAt    DateTime?
+  questions   Question[]
+  submissions Submission[]
+
+  @@index([createdAt])
+}
+
+model Question {
+  id       String       @id @default(cuid())
+  pollId   String
+  index    Int
+  type     QuestionType
+  title    String
+  required Boolean      @default(false)
+  config   Json?
+  helpText String?
+  answers  Answer[]
+  choices  Choice[]
+  poll     Poll         @relation(fields: [pollId], references: [id], onDelete: Cascade)
+
+  @@unique([pollId, index])
+  @@index([pollId, index])
+}
+
+model Choice {
+  id            String         @id @default(cuid())
+  questionId    String
+  index         Int
+  label         String
+  answers       Answer[]       @relation("ChoiceAnswers")
+  answerChoices AnswerChoice[]
+  question      Question       @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([questionId, index])
+  @@index([questionId, index])
+}
+
+model FireScore {
+  id        String   @id @default(cuid())
+  name      String
+  score     Int
+  createdAt DateTime @default(now())
+
+  @@index([score, createdAt])
+}
+
+model Submission {
+  id          String   @id @default(cuid())
+  pollId      String
+  fingerprint String
+  createdAt   DateTime @default(now())
+  answers     Answer[]
+  poll        Poll     @relation(fields: [pollId], references: [id], onDelete: Cascade)
+
+  @@unique([pollId, fingerprint])
+  @@index([pollId, createdAt])
+}
+
+model SubmissionNonce {
+  id        String    @id @default(cuid())
+  pollId    String
+  nonce     String    @unique
+  createdAt DateTime  @default(now())
+  usedAt    DateTime?
+
+  @@index([pollId, createdAt])
+  @@index([pollId, nonce])
+}
+
+model Answer {
+  id           String         @id @default(cuid())
+  submissionId String
+  questionId   String
+  choiceId     String?
+  text         String?
+  scaleValue   Int?
+  ratingValue  Int?
+  createdAt    DateTime       @default(now())
+  choice       Choice?        @relation("ChoiceAnswers", fields: [choiceId], references: [id])
+  question     Question       @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  submission   Submission     @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  choices      AnswerChoice[]
+
+  @@index([submissionId, questionId])
+  @@index([choiceId])
+}
+
+model AnswerChoice {
+  answerId String
+  choiceId String
+  answer   Answer @relation(fields: [answerId], references: [id], onDelete: Cascade)
+  choice   Choice @relation(fields: [choiceId], references: [id], onDelete: Cascade)
+
+  @@id([answerId, choiceId])
 }
 
 enum Role {
@@ -19,9 +302,8 @@ enum GalleryLayout {
   SLIDESHOW
 }
 
-/**
- * ✅ 日本語ラベルは @map でDB値にマッピング（キーは英数字と_のみ）
- */
+/// *
+/// * ✅ 日本語ラベルは @map でDB値にマッピング（キーは英数字と_のみ）
 enum District {
   NAGOYA_CHIKUSA @map("名古屋千種地区")
   NAGOYA_SEIBU   @map("名古屋西部地区")
@@ -40,89 +322,6 @@ enum District {
   OTHERS         @map("その他地区")
 }
 
-model GameScore {
-  id        String   @id @default(cuid())
-  game      String   // 例: "scout-crush"
-  name      String
-  score     Int
-  movesUsed Int?
-  createdAt DateTime @default(now())
-
-  @@index([game, score])
-}
-
-model MeetingReport {
-  id               Int      @id @default(autoincrement())
-  slug             String   @unique
-  title            String
-  date             DateTime
-  fiscalYear       Int
-  round            Int
-  isPublished      Boolean  @default(false)
-  publishedAt      DateTime?
-  coverUrl         String?
-  youtubeId        String?
-  reportUrl        String?
-  subtitle         String?
-  lead             String?
-  schedule         Json?
-  sections         Json?
-  pageGallery      Json?
-  pageGalleryLayout String?
-  groups           Json?
-  sectionsGroups   Json?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt @default(now())
-
-  @@unique([fiscalYear, round], name: "fiscalYear_round")
-}
-
-model CalendarEvent {
-  id         String   @id @default(cuid())
-  date       DateTime // JSTの 00:00 を推奨（下記APIでJST→UTC変換）
-  endDate    DateTime? //終了日
-  title      String
-  url        String?
-  note       String?
-  area       String?
-  isPublished Boolean  @default(true)
-
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-
-  @@index([date, isPublished])
-}
-
-model Recruiting {
-  id          String   @id @default(cuid())
-  title       String
-  date        DateTime        // 実施日（JST 00:00 保存）
-  endDate     DateTime?       // 実施終了日
-  deadline    DateTime        // 参加期限（JST 00:00 保存）
-  area        String
-  url         String?
-  urlDesc     String?
-  imageUrl    String?
-  isPublished Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@index([deadline, isPublished])
-  @@index([date])
-}
-
-model User {
-  id           Int      @id @default(autoincrement())
-  username     String   @unique
-  passwordHash String
-  role         Role     @default(EDITOR)
-  isActive     Boolean  @default(true)
-  isSuper      Boolean  @default(false)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-}
-
 enum QuestionType {
   RADIO
   CHECKBOX
@@ -131,234 +330,10 @@ enum QuestionType {
   RATING
 }
 
-model Participant {
-  id        String   @id @default(cuid())
-  name      String
-  troop     String
-  rsAge     Int
-  district  District
-  email     String?  @unique
-  createdAt DateTime @default(now())
-
-  attendance  Attendance[]
-  emailQueues EmailQueue[]
-  emailTokens EmailToken[]
-}
-
-/**
- * 送信ステータスの enum は先に定義しておくと見通し良いです
- */
+/// *
+/// * 送信ステータスの enum は先に定義しておくと見通し良いです
 enum EmailStatus {
   PENDING
   SENT
   FAILED
-}
-
-
-model EmailQueue {
-  id            String      @id @default(cuid())
-  participantId String
-  meetingCode   String
-  to            String
-  subject       String
-  body          String
-
-  status        EmailStatus @default(PENDING)
-  error         String?
-
-  // 受付時刻（従来の作成時刻として維持）
-  queuedAt      DateTime    @default(now())
-
-  // 送信順序・バックオフ用の “実行予定時刻”
-  scheduledAt   DateTime    @default(now())
-
-  sentAt        DateTime?
-
-  // 排他制御（送信中ロック）
-  lockId        String?
-  lockedAt      DateTime?
-
-  //  再試行回数
-  attempts      Int         @default(0)
-
-  // 二重投入防止キー（会×参加者×件名+本文などのハッシュ）
-  idempotencyKey String     @unique @default(uuid())
-
-  participant Participant @relation(fields: [participantId], references: [id])
-
-  // 既存indexに加えて scheduledAt/lockedAt で運用を安定化
-  @@index([status, queuedAt])
-  @@index([status, scheduledAt])
-  @@index([lockedAt])
-  @@index([participantId, meetingCode])
-}
-
-model EmailToken {
-  id            String    @id @default(cuid())
-  token         String    @unique
-  participantId String
-  meetingCode   String
-  expiresAt     DateTime
-  usedAt        DateTime?
-
-  participant Participant @relation(fields: [participantId], references: [id])
-
-  @@index([participantId, meetingCode])
-}
-
-model MeetingSheet {
-  id        String   @id @default(cuid())
-  key       String   @unique // 例: "default"
-  data      Json // { meetings: [...], peopleByRegion: {...} }
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model Meeting {
-  id        String   @id @default(cuid())
-  title     String
-  date      DateTime
-  reiwa     Int // 例: R5=5, R6=6…
-  seq       Int // 同年度内の通番（1,2,3…）
-  code      String   @unique // 例: "R6-03"
-  createdAt DateTime @default(now())
-
-  attendance Attendance[]
-
-  @@unique([reiwa, seq])
-  @@index([reiwa, seq])
-  @@index([date])
-}
-
-model Attendance {
-  id            String   @id @default(cuid())
-  meetingId     String
-  participantId String
-  checkedAt     DateTime @default(now())
-  via           String? // "qr" | "manual" など
-
-  meeting     Meeting     @relation(fields: [meetingId], references: [id], onDelete: Cascade)
-  participant Participant @relation(fields: [participantId], references: [id])
-
-  @@unique([meetingId, participantId]) // 二重チェックイン防止
-  @@index([meetingId, checkedAt])
-}
-
-model Poll {
-  id          String       @id @default(cuid())
-  title       String
-  desc        String?
-  isPublic    Boolean      @default(true)
-  createdAt   DateTime     @default(now())
-  closesAt    DateTime?
-  questions   Question[]
-  submissions Submission[]
-
-  @@index([createdAt])
-}
-
-model Question {
-  id     String @id @default(cuid())
-  pollId String
-  poll   Poll   @relation(fields: [pollId], references: [id], onDelete: Cascade)
-
-  index    Int
-  type     QuestionType
-  title    String
-  required Boolean      @default(false)
-
-  config  Json?
-  choices Choice[]
-  answers Answer[]
-  helpText  String?
-
-  @@unique([pollId, index])
-  @@index([pollId, index])
-}
-
-model Choice {
-  id         String   @id @default(cuid())
-  questionId String
-  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
-
-  index Int
-  label String
-
-  answers       Answer[]       @relation("ChoiceAnswers")
-  answerChoices AnswerChoice[]
-
-  @@unique([questionId, index])
-  @@index([questionId, index])
-}
-
-model FireScore {
-  id        String   @id @default(cuid())
-  name      String
-  score     Int
-  createdAt DateTime @default(now())
-
-  @@index([score, createdAt])
-}
-
-model Submission {
-  id          String   @id @default(cuid())
-  pollId      String
-  poll        Poll     @relation(fields: [pollId], references: [id], onDelete: Cascade)
-  fingerprint String
-  createdAt   DateTime @default(now())
-
-  answers Answer[]
-
-  @@unique([pollId, fingerprint])
-  @@index([pollId, createdAt])
-}
-
-model SubmissionNonce {
-  id        String   @id @default(cuid())
-  pollId    String
-  nonce     String   @unique
-  createdAt DateTime @default(now())
-  usedAt    DateTime?
-
-  @@index([pollId, createdAt])
-  @@index([pollId, nonce])
-}
-
-model Answer {
-  id           String     @id @default(cuid())
-  submissionId String
-  questionId   String
-  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
-  question     Question   @relation(fields: [questionId], references: [id], onDelete: Cascade)
-
-  // radio
-  choiceId String?
-  choice   Choice? @relation("ChoiceAnswers", fields: [choiceId], references: [id])
-
-  // checkbox
-  choices AnswerChoice[]
-
-  // text
-  text String?
-
-  // scale
-  scaleValue Int?
-
-  // rating
-  ratingValue Int?
-
-  createdAt DateTime @default(now())
-
-  @@index([submissionId, questionId])
-  @@index([choiceId])
-}
-
-model AnswerChoice {
-  answerId String
-  choiceId String
-
-  answer Answer @relation(fields: [answerId], references: [id], onDelete: Cascade)
-  choice Choice @relation(fields: [choiceId], references: [id], onDelete: Cascade)
-
-  @@id([answerId, choiceId])
 }
