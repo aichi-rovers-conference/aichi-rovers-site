@@ -8,23 +8,50 @@ import ArcHeader1 from "@/src/components/ArcHeader1";
 import ArcFooter from "@/src/components/ArcFooter";
 import HeroImage from "@/src/components/HeroImage";
 
-/* ===== 初心者でも編集しやすい外部JSON =====
-   /public/excom/members.json に配列で置くだけ
-   例:
-   [
-     {"name":"山田 太郎","unit":"千種第66団","age":22,"role":"議長","photo":"/images/excom/yamada.jpg"},
-     {"name":"佐藤 花子","unit":"豊田第12団","age":21,"role":"副議長"}
-   ]
-*/
-const DATA_URL = "/excom/members.json";
+/* ===== データソース ===== */
+const DATA_URL_PRIMARY = "/api/excom/members";   // まずはDB(API)
+const DATA_URL_FALLBACK = "/excom/members.json"; // ダメなら従来のJSON
 
-type Member = {
+/* ===== 型 ===== */
+type ApiMember = {
+  id?: string;
+  name: string;
+  unit: string;
+  role?: string | null;
+  birthDate?: string | Date | null;
+  photoUrl?: string | null;
+  order?: number | null;
+};
+
+type JsonMember = {
   name: string;
   unit: string;   // 所属団
   age?: number;
   role?: string;  // 役職
-  photo?: string; // 省略可（/public 配下推奨）
+  photo?: string; // /public 配下推奨
+  order?: number;
 };
+
+type Member = {
+  name: string;
+  unit: string;
+  age?: number;
+  role?: string;
+  photo?: string;
+  order?: number;
+};
+
+/* ===== ユーティリティ ===== */
+function ageFromBirthDate(b?: string | Date | null): number | undefined {
+  if (!b) return undefined;
+  const d = new Date(b);
+  if (isNaN(d.getTime())) return undefined;
+  const now = new Date();
+  let age = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age--;
+  return age;
+}
 
 /* ===== 見出し（赤棒付き） ===== */
 function SectionHeading({ title }: { title: string }) {
@@ -43,7 +70,8 @@ function SectionHeading({ title }: { title: string }) {
 
 /* ===== カード：運営委員 ===== */
 function MemberCard({ m }: { m: Member }) {
-  const initials = m.name?.split(/\s+/).map((s) => s[0]).join("").slice(0, 2) || "ARC";
+  const initials =
+    m.name?.split(/\s+/).map((s) => s[0]).join("").slice(0, 2) || "ARC";
 
   return (
     <motion.div
@@ -118,32 +146,57 @@ export default function ExecCommitteePage() {
     { name: "ARC定例会", path: "/arc/conference" },
     { name: "ARC運営委員会", path: "/arc/executive-committee" },
     { name: "ARCアンケート", path: "/polls" },
-    // { name: "ミニゲーム", path: "/games" },
   ];
 
-  // データ読込
+  // データ読込（API → JSON フォールバック）
   const [members, setMembers] = useState<Member[] | null>(null);
+
   useEffect(() => {
-    fetch(DATA_URL, { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : []))
-      .then((arr: Member[]) => {
-        if (!Array.isArray(arr)) return setMembers([]);
-        // 名前と所属団は必須
-        const safe = arr.filter((m) => m?.name && m?.unit);
+    (async () => {
+      try {
+        // ①API を試す
+        const r1 = await fetch(DATA_URL_PRIMARY, { cache: "no-store" });
+        if (r1.ok) {
+          const arr: ApiMember[] = await r1.json();
+          if (Array.isArray(arr)) {
+            const mapped: Member[] = arr.map((m) => ({
+              name: m.name,
+              unit: m.unit,
+              role: m.role ?? undefined,
+              age: ageFromBirthDate(m.birthDate),
+              photo: m.photoUrl ?? undefined,
+              order: typeof m.order === "number" ? m.order : 0,
+            }));
+            setMembers(mapped);
+            return;
+          }
+        }
+
+        // ②フォールバック JSON
+        const r2 = await fetch(DATA_URL_FALLBACK, { cache: "no-store" });
+        const arr2: JsonMember[] = r2.ok ? await r2.json() : [];
+        const safe = Array.isArray(arr2) ? arr2.filter((m) => m?.name && m?.unit) : [];
         setMembers(safe);
-      })
-      .catch(() => setMembers([]));
+      } catch {
+        setMembers([]);
+      }
+    })();
   }, []);
-  const list = useMemo(() => members ?? [], [members]);
+
+  const list = useMemo(() => {
+    const arr = members ?? [];
+    // order があれば優先して昇順に
+    return [...arr].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  }, [members]);
 
   return (
     <div className="w-full bg-white">
       {/* ヘッダー */}
       <ArcHeader1 navItems={navItems} />
 
-      {/* ★ 共通ヒーロー適用（パララックス・オーバーレイ・自動blur/LQIP対応） */}
+      {/* ★ 共通ヒーロー適用 */}
       <HeroImage
-        src="/images/R6-3.JPG"           // 静的 import に置き換えてもOK（さらに高品質なblur）
+        src="/images/R6-3.JPG"
         alt="Aichi Rovers Conference"
         heightClass="h-[40vh] sm:h-[46vh]"
         parallaxAmount={180}
@@ -167,7 +220,7 @@ export default function ExecCommitteePage() {
         </motion.div>
       </HeroImage>
 
-      {/* 本文：紹介テキスト（モバイル最適化） */}
+      {/* 本文：紹介テキスト */}
       <section className="w-full bg-white py-10 sm:py-12 md:py-14 px-4 sm:px-6 md:px-10 lg:px-16">
         <div
           className="mx-auto max-w-6xl space-y-5 text-gray-800"

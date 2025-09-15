@@ -1,4 +1,4 @@
-// app/arc/conference/page.tsx など、このページファイルまるごと置き換え
+// app/arc/conference/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -7,6 +7,9 @@ import { motion } from "framer-motion";
 import ArcHeader1 from "@/src/components/ArcHeader1";
 import ArcFooter from "@/src/components/ArcFooter";
 import HeroImage from "@/src/components/HeroImage";
+
+/* ===== ここだけでON/OFFできる仮置きフラグ ===== */
+const SHOW_R6_TEMP_BLOCK = true;
 
 /* ===== 型（DB = MeetingReportに対応） ===== */
 type MeetingReport = {
@@ -221,6 +224,96 @@ function MeetingCard({ m }: { m: MeetingReport }) {
   );
 }
 
+/* ====== 仮置き：令和6年度リンク集（削除しやすいよう分離） ====== */
+function TempR6Block() {
+  const links = [
+    {
+      label: "令和6年度ARC年次総会・第1回ARC定例会",
+      href: "https://sites.google.com/u/0/d/1qdfKHREwy52qS63RdronmM6l2PF-yu7u/p/15lz5zF0Xi6H4XPfKRJpJ6SsZLw2eB6w1/preview?authuser=0",
+    },
+    {
+      label: "令和6年度第2回ARC定例会",
+      href: "https://www.google.com/url?q=https%3A%2F%2Froverport.rcjweb.jp%2Fprefecture%2F576%2F&sa=D&sntz=1&usg=AOvVaw3-kr54wWF_3BFni6_fryh8",
+    },
+    {
+      label: "令和6年度第3回ARC定例会・交流会",
+      href: "https://www.google.com/url?q=https%3A%2F%2Froverport.rcjweb.jp%2Fprefecture%2F1190%2F&sa=D&sntz=1&usg=AOvVaw2inHqqTjJy6JJyTiqU2R99",
+    },
+    {
+      label: "令和6年度第4回ARC定例会",
+      href: "https://www.google.com/url?q=https%3A%2F%2Froverport.rcjweb.jp%2Fprefecture%2F2054%2F&sa=D&sntz=1&usg=AOvVaw0-P5F7LwFtaTOTqFIHSJZd",
+    },
+  ];
+
+  const ytId = "XIgDaAVNKW0"; // 令和6年度ARC第2回定例会のYouTube
+
+  return (
+    <section className="w-full">
+      <div className="mx-auto max-w-6xl space-y-4 sm:space-y-5">
+        <div>
+          <h2 className="text-gray-900 font-extrabold tracking-tight" style={{ fontSize: "clamp(20px,4.4vw,30px)" }}>
+            令和6年度
+          </h2>
+          <p className="text-gray-700 mt-1" style={{ fontSize: "clamp(12px,3.3vw,15px)" }}>
+            ↓クリックすると各回の様子が見られます↓
+          </p>
+        </div>
+
+        <ul className="space-y-3">
+          {links.map((l) => (
+            <li key={l.label} className="rounded-xl border border-gray-200 bg-white p-4 sm:p-5 shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <a
+                  href={l.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-semibold text-gray-900 underline decoration-dotted underline-offset-4"
+                  style={{ fontSize: "clamp(14px,3.6vw,18px)" }}
+                >
+                  {l.label}
+                </a>
+                <motion.a
+                  href={l.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  whileHover={{ y: -2, scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  transition={{ type: "spring", stiffness: 320, damping: 24 }}
+                  className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-red-600 font-bold text-gray-900 bg-white shadow-sm self-start"
+                  style={{ fontSize: "clamp(12px,3.2vw,14px)" }}
+                  aria-label={`${l.label} を開く`}
+                >
+                  開く <span aria-hidden>→</span>
+                </motion.a>
+              </div>
+            </li>
+          ))}
+        </ul>
+
+        {/* YouTube プレビュー（第2回） */}
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 shadow-sm">
+          <h3 className="font-bold text-gray-900 mb-3" style={{ fontSize: "clamp(16px,3.8vw,20px)" }}>
+            令和6年度 第2回ARC定例会（YouTube）
+          </h3>
+          <div className="aspect-video w-full rounded-xl overflow-hidden border bg-black/5">
+            <iframe
+              className="w-full h-full"
+              src={`https://www.youtube.com/embed/${ytId}`}
+              title="令和6年度第2回ARC定例会 YouTube"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              referrerPolicy="strict-origin-when-cross-origin"
+              allowFullScreen
+              loading="lazy"
+            />
+          </div>
+        </div>
+
+        {/* 開発者向けメモ（消すときはこの <section> 丸ごと or SHOW_R6_TEMP_BLOCK を false に） */}
+      </div>
+    </section>
+  );
+}
+
 /* ====== ページ本体 ====== */
 export default function MeetingsPage() {
   // ヘッダーのナビ
@@ -355,6 +448,9 @@ export default function MeetingsPage() {
               ))
             )}
           </div>
+
+          {/* === ここに仮置きR6ブロックを差し込み === */}
+          {SHOW_R6_TEMP_BLOCK && <TempR6Block />}
         </div>
       </section>
 
@@ -379,12 +475,12 @@ export default function MeetingsPage() {
 
           <div className="flex justify-center">
             <Image
-              src="/images/yujo-seal-flyer.jpg"
+              src="/images/FriendshipStickerProject_Flyer.png"
               alt="友情シールプロジェクト フライヤー"
               width={920}
               height={600}
               sizes="(max-width:640px)92vw,(max-width:1024px)80vw,920px"
-              className="rounded-xl shadow-lg object-contain bg-white w-full max-w-[920px] max-w-full h-auto"
+              className="rounded-xl shadow-lg object-contain bg-white w/full max-w-[920px] h-auto"
             />
           </div>
         </div>

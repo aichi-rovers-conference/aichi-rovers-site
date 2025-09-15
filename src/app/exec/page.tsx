@@ -41,7 +41,6 @@ export default async function ExecPage() {
     title: string;
     desc?: string;
     accent?: Accent;
-    /** 👇 追加：メンテ時に無効化 */
     disabled?: boolean;
   }[] = [
     {
@@ -80,6 +79,17 @@ export default async function ExecPage() {
       desc: "募集と年間スケジュールの追加・編集・公開設定",
       accent: "red",
       disabled: false, // ← 常に有効（表示は canEditCalendar 次第）
+    });
+  }
+
+  if (isAdmin || isSuper) {
+    links.push({
+      href: "/exec/excom",
+      icon: <ShieldCheck className="size-6 md:size-7 xl:size-8" />,
+      title: "運営委員紹介管理",
+      desc: "運営委員紹介ページの管理",
+      accent: "blue",
+      disabled: !isSuper,
     });
   }
 
