@@ -15,12 +15,14 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-export const metadata: Metadata = {
+export const metadata = {
   title: "ARC Web",
   description: "愛知ローバース会議の公式Webサイトです",
   icons: {
-    icon: "/icon.png",                     // PC
-    apple: [{ url: "/apple-icon-20250916.png", sizes: "180x180" }],                   // iOS Safari も同じにする
+    icon: "/icon.png", // PCのファビコン
+    apple: [
+      { url: "/icon.png", sizes: "180x180" }, // iOS Safari 用にも同じを指示
+    ],
   },
 };
 
