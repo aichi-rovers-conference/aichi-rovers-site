@@ -45,6 +45,25 @@ function toExtrasRecord(input: unknown): Record<string, string> | null {
   return null;
 }
 
+function normalizeBirthDate(b?: string | Date | null): string | undefined {
+  if (!b) return undefined;
+  const d = new Date(b);
+  if (isNaN(d.getTime())) return undefined;
+  return d.toISOString().slice(0, 10);
+}
+
+function toMemberCardModel(m: any) {
+  return {
+    name: String(m?.name ?? ""),
+    unit: String(m?.unit ?? ""),
+    role: m?.role ? String(m.role) : undefined,
+    birthDate: normalizeBirthDate(m?.birthDate),
+    photo: m?.photoUrl ? String(m.photoUrl) : undefined, // MemberCard は photo を見る想定
+    extras: toExtrasRecord(m?.extras) ?? undefined,
+    // 必要なら order などもここで渡せる
+  };
+}
+
 export default function EditorClient() {
   const [list, setList] = useState<any[]>([]);
   const [draft, setDraft] = useState<MemberFormValue>({
@@ -172,11 +191,15 @@ export default function EditorClient() {
 
       <section>
         <h2 className="mb-3 text-lg font-bold">登録済み（{sorted.length}件）</h2>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {/* 公開ページと同じ感覚：モバイル1・md 2・xl 3、余白広め */}
+        <div className="grid grid-cols-1 gap-5 sm:gap-6 md:grid-cols-2 xl:grid-cols-3">
           {sorted.map((m) => (
             <div key={m.id} className="space-y-2">
-              <MemberCard m={m} />
-              <div className="flex gap-2">
+              {/* ▼ ここが重要：MemberCard向けに正規化して渡す */}
+              <MemberCard m={toMemberCardModel(m)} />
+
+              {/* 操作ボタン */}
+              <div className="flex gap-2 pt-1">
                 <button
                   className="rounded-lg border px-3 py-1 text-sm hover:bg-gray-50"
                   onClick={() => startEdit(m)}

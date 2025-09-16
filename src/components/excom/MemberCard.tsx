@@ -1,105 +1,98 @@
 // src/components/excom/MemberCard.tsx
 import Image from "next/image";
+import { motion } from "framer-motion";
+// ...他のimport
 
-type ExtraKV = { label: string; value: string };
+type MemberCardProps = {
+  m: {
+    name: string;
+    unit: string;
+    role?: string;
+    birthDate?: string;      // "YYYY-MM-DD" など
+    photo?: string | null;   // どちらでもOKにする
+    photoUrl?: string | null;
+    extras?: Record<string, string>;
+  };
+};
 
-function parseExtras(extras: unknown): ExtraKV[] {
-  if (!extras) return [];
-
-  // JSON文字列 → パース
-  if (typeof extras === "string") {
-    try {
-      const j = JSON.parse(extras);
-      return parseExtras(j);
-    } catch {
-      return [];
-    }
-  }
-
-  // 配列 [{label, value}] / [{key, value}] / [{name, value}] などを吸収
-  if (Array.isArray(extras)) {
-    return extras
-      .map((it: any) => {
-        if (!it) return null;
-        const label = String(it.label ?? it.key ?? it.name ?? "").trim();
-        const value = String(it.value ?? "").trim();
-        if (!label || !value) return null;
-        return { label, value };
-      })
-      .filter(Boolean) as ExtraKV[];
-  }
-
-  // オブジェクト {label:value, ...}
-  if (typeof extras === "object") {
-    return Object.entries(extras as Record<string, unknown>)
-      .map(([k, v]) => {
-        const label = String(k ?? "").trim();
-        const value = String(v ?? "").trim();
-        if (!label || !value) return null;
-        return { label, value };
-      })
-      .filter(Boolean) as ExtraKV[];
-  }
-
-  return [];
+function formatBirthDateJP(iso?: string): string | undefined {
+  if (!iso) return undefined;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return undefined;
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
-export default function MemberCard({
-  m,
-  showExtras = true,
-}: {
-  m: any;
-  /** 公開ページでも extras を出したい場合は true（既定） */
-  showExtras?: boolean;
-}) {
-  const name = m?.name ?? "";
-  const unit = m?.unit ?? "";
-  const role = m?.role ?? "";
-  const photoUrl = m?.photoUrl ?? "";
-  const extras = showExtras ? parseExtras(m?.extras) : [];
+export default function MemberCard({ m }: MemberCardProps) {
+  // ▼ ここで“どちらでも”受けられるように統一
+  const raw = (m.photo ?? m.photoUrl ?? "").trim();
+  const photo = raw.length > 0 ? raw : undefined;
+
+  const initials =
+    m.name?.split(/\s+/).map((s) => s[0]).join("").slice(0, 2) || "ARC";
+  const birth = formatBirthDateJP(m.birthDate);
 
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-      <div className="flex items-start gap-4">
-        {/* 写真 or プレースホルダ */}
-        <div className="relative h-20 w-20 overflow-hidden rounded-xl border border-gray-200 bg-gray-100">
-          {photoUrl ? (
-            // next/imageを使わずimgでもOK。remote画像をnext/imageで使うならnext.config.jsにremotePatterns設定を
-            <Image
-              src={photoUrl}
-              alt={name ? `${name} の写真` : "member photo"}
-              fill
-              sizes="80px"
-              className="object-cover"
-              unoptimized
-            />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center text-gray-400">
-              <span className="text-sm">No Photo</span>
+    <motion.div
+      whileHover={{ y: -3, scale: 1.005 }}
+      whileTap={{ scale: 0.995 }}
+      transition={{ type: "spring", stiffness: 260, damping: 22 }}
+      className="group overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-md"
+    >
+      <div className="flex items-center gap-5 p-5 md:p-6">
+        {photo ? (
+          <Image
+            src={photo}
+            alt={`${m.name} の写真`}
+            width={112}
+            height={112}
+            sizes="(max-width: 640px) 96px, 112px"
+            className="h-[96px] w-[96px] rounded-2xl border object-cover md:h-[112px] md:w-[112px]"
+            // 外部ドメイン未許可でも表示できるように
+            unoptimized
+          />
+        ) : (
+          // “No Photo” テキストはやめて、イニシャルのプレースホルダーに統一
+          <div className="grid h-[96px] w-[96px] place-items-center rounded-2xl border bg-gradient-to-br from-gray-50 to-gray-100 font-bold text-black md:h-[112px] md:w-[112px]">
+            <span className="text-[18px] md:text-[20px]">{initials}</span>
+          </div>
+        )}
+
+        <div className="min-w-0 flex-1 leading-relaxed">
+          <div className="truncate font-extrabold text-black" style={{ fontSize: "clamp(18px, 4.2vw, 22px)" }}>
+            {m.name}
+          </div>
+
+          <div className="mt-1 text-black" style={{ fontSize: "clamp(13px, 3.4vw, 15px)" }}>
+            {m.unit}
+          </div>
+
+          <div className="mt-2 grid grid-cols-1 gap-1 text-black sm:grid-cols-2" style={{ fontSize: "clamp(13px, 3.4vw, 15px)" }}>
+            {m.role && <div className="truncate">役職：{m.role}</div>}
+            {birth && <div className="truncate">生年月日：{birth}</div>}
+          </div>
+
+          {m.extras && Object.keys(m.extras).length > 0 && (
+            <div className="mt-3">
+              <dl className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">
+                {Object.entries(m.extras).map(([k, v]) => (
+                  <div key={k} className="min-w-0">
+                    <dt className="font-semibold text-black" style={{ fontSize: "clamp(12px, 3.2vw, 14px)" }}>
+                      {k}
+                    </dt>
+                    <dd
+                      className="break-words text-black"
+                      style={{ fontSize: "clamp(13px, 3.6vw, 15px)" }}
+                      title={`${k}: ${v}`}
+                    >
+                      {v}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
             </div>
           )}
         </div>
-
-        <div className="min-w-0">
-          <h3 className="text-lg font-bold text-gray-900 leading-tight">{name}</h3>
-          <p className="mt-0.5 text-sm text-gray-600">
-            {unit}
-            {role ? <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-700">{role}</span> : null}
-          </p>
-
-          {/* 任意項目（extras） */}
-          {extras.length > 0 && (
-            <dl className="mt-3 space-y-1.5">
-              {extras.map((kv, i) => (
-                <div key={`${kv.label}-${i}`} className="grid grid-cols-[auto,1fr] gap-x-2">
-                  <dt className="shrink-0 text-xs font-medium text-gray-500">{kv.label}</dt>
-                  <dd className="min-w-0 text-sm text-gray-800 break-words">{kv.value}</dd>
-                </div>
-              ))}
-            </dl>
-          )}
-        </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
