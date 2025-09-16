@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { verifyToken, COOKIE_NAME } from "@/lib/auth";
-import ArcHeader1 from "@/src/components/ArcHeader1";
+import ArcHeader from "@/src/components/ArcHeader";
 import ArcFooter from "@/src/components/ArcFooter";
 import EditorClient from "./EditorClient";
 
@@ -27,7 +27,7 @@ export default async function ExcomEditorPage() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-white to-gray-50">
       <div className="h-2 w-full bg-gradient-to-r from-violet-400 via-fuchsia-400 to-indigo-400" />
-      <ArcHeader1 navItems={[{ name: "ダッシュボード", path: "/exec" }]} />
+      <ArcHeader />
       <main className="mx-auto max-w-6xl px-4 md:px-8 py-8">
         <h1 className="text-2xl font-extrabold tracking-tight">運営委員 編集</h1>
         <EditorClient />
