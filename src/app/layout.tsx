@@ -18,6 +18,20 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "ARC Web",
   description: "愛知ローバース会議の公式Webサイトです",
+  icons: {
+    // PC向け（同一デザイン）
+    icon: [
+      { url: "/favicon.ico" }, // あるなら
+      { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
+      { url: "/favicon-16x16.png", sizes: "16x16", type: "image/png" },
+    ],
+    // iOS Safari（スマホのタブ/ホーム追加で参照）→ PCと同じ画像にする
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],
+    // 任意（Safari ピン留め）
+    other: [{ rel: "mask-icon", url: "/safari-pinned-tab.svg", color: "#000000" }],
+  },
+  // PWA を使っているなら manifest も同じ画像へ
+  manifest: "/site.webmanifest",
 };
 
 // async にして headers() を await
