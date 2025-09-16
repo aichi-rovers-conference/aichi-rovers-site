@@ -2,7 +2,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { headers } from "next/headers";
-import Script from "next/script";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -15,19 +14,15 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-export const metadata = {
+export const metadata: Metadata = {
   title: "ARC Web",
   description: "愛知ローバース会議の公式Webサイトです",
   icons: {
-    icon: "/icon.png", // PCのファビコン
-    apple: [
-      { url: "/icon.png", sizes: "180x180" }, // iOS Safari 用にも同じを指示
-    ],
+    icon: "/icon.png", // PC用
+    apple: [{ url: "/apple-touch-icon-20250916.png", sizes: "180x180" }],
   },
 };
 
-
-// async にして headers() を await
 export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
@@ -36,15 +31,6 @@ export default async function RootLayout({
 
   return (
     <html lang="ja">
-      <head>
-        {/*
-          もし自前のインライン <script> を使うなら nonce を必ず付与してください。
-          例:
-        */}
-        {/* <Script id="boot" nonce={nonce} strategy="beforeInteractive">
-          {`window.__ARC__ = { version: 1 };`}
-        </Script> */}
-      </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         {children}
       </body>
