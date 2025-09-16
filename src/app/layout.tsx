@@ -20,9 +20,8 @@ export const metadata: Metadata = {
   description: "愛知ローバース会議の公式Webサイトです",
   icons: {
     icon: "/icon.png",                     // PC
-    apple: [{ url: "/apple-icon.png", sizes: "180x180" }],                   // iOS Safari も同じにする
+    apple: [{ url: "/apple-icon-20250916.png", sizes: "180x180" }],                   // iOS Safari も同じにする
   },
-  manifest: "/site.webmanifest",
 };
 
 
