@@ -89,11 +89,10 @@ export default function Home() {
 
           <div className="flex justify-center">
             <Image
-              src={sampleImg}
+              src="/images/home1.JPG"
               alt="ARC活動写真"
               width={520}
               height={420}
-              placeholder="blur"
               loading="lazy"
               sizes="(max-width: 768px) 86vw, 520px"
               className="rounded-lg shadow-lg object-cover select-none w-full max-w-[520px] h-auto"
@@ -134,11 +133,10 @@ export default function Home() {
 
           <div className="flex justify-center">
             <Image
-              src={sampleImg}
+              src="/images/home2.JPG"
               alt="ARC活動写真"
               width={520}
               height={420}
-              placeholder="blur"
               loading="lazy"
               sizes="(max-width: 768px) 86vw, 520px"
               className="rounded-lg shadow-lg object-cover select-none w-full max-w-[520px] h-auto"
@@ -169,12 +167,10 @@ export default function Home() {
 
           <div className="flex justify-center">
             <Image
-              src={sampleImg}
+              src="/images/home3.JPG"
               alt="ARC活動写真"
               width={520}
-              height={420}
-              placeholder="blur"
-              loading="lazy"
+              height={420}              loading="lazy"
               sizes="(max-width: 768px) 86vw, 520px"
               className="rounded-lg shadow-lg object-cover select-none w-full max-w-[520px] h-auto"
               draggable={false}
