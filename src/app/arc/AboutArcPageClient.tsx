@@ -118,7 +118,7 @@ export default function AboutArcPage() {
           </div>
           <div className="flex justify-center">
             <Image
-              src="/images/ARCとは photo.png"
+              src="/images/arc-photo.png"
               alt="ARCの紹介イメージ"
               width={520}
               height={380}
