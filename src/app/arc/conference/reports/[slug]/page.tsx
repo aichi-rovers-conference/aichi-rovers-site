@@ -299,6 +299,7 @@ export default async function Page(ctx: { params: Promise<{ slug: string }> }) {
     { name: "ARC定例会", path: "/arc/conference" },
     { name: "ARC運営委員会", path: "/arc/executive-committee" },
     { name: "ARCアンケート", path: "/polls" },
+    { name: "目安箱", path: "/suggestion-box"},
     // { name: "ミニゲーム", path: "/games" },
   ];
 
