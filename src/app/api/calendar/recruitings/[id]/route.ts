@@ -1,3 +1,4 @@
+// src/app/api/calendar/recruitings/[id]/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import prisma from "@/lib/prisma";
@@ -27,16 +28,16 @@ function getIdWhere(id: string) {
 }
 
 async function getSession(): Promise<Session | null> {
-  const jar = await cookies(); // ← ここが重要
+  const jar = await cookies();
   const token = jar.get(COOKIE_NAME)?.value ?? "";
   const s = token ? await verifyToken(token) : null;
   return s ? (s as Session) : null;
 }
 
-export async function PATCH(
-  req: NextRequest,
-  ctx: { params: { id: string } }
-) {
+// ★ Next.js 15 対応：params は Promise として扱う
+type Ctx = { params: Promise<{ id: string }> };
+
+export async function PATCH(req: NextRequest, ctx: Ctx) {
   const session = await getSession();
   if (!session || !session.isActive) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -45,7 +46,8 @@ export async function PATCH(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const { id } = ctx.params;
+  const { id } = await ctx.params;
+
   const body = await req.json().catch(() => null);
   if (!body) return NextResponse.json({ error: "Bad Request" }, { status: 400 });
 
@@ -86,10 +88,7 @@ export async function PATCH(
   return NextResponse.json({ item: updated });
 }
 
-export async function DELETE(
-  req: NextRequest,
-  ctx: { params: { id: string } }
-) {
+export async function DELETE(req: NextRequest, ctx: Ctx) {
   const session = await getSession();
   if (!session || !session.isActive) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -98,7 +97,7 @@ export async function DELETE(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const { id } = ctx.params;
+  const { id } = await ctx.params;
 
   const p = prisma as any;
   await p.recruiting.delete({
