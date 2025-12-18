@@ -16,6 +16,7 @@ import {
   LogOut,
   UserCog,
   CalendarCheck,
+  MessageCircleMore,
 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -66,6 +67,14 @@ export default async function ExecPage() {
       desc: "アンケートの作成・公開・回答状況の確認",
       accent: "blue",
       disabled: !isSuper, // ← isSuper以外は押せない
+    },
+    {
+      href: "/exec/suggestion-box",
+      icon: <MessageCircleMore className="size-6 md:size-7 xl:size-8" />,
+      title: "目安箱管理",
+      desc: "投稿内容の確認・公開設定・対応状況の管理",
+      accent: "green",
+      disabled: !(isAdmin || isSuper),
     },
   ];
 

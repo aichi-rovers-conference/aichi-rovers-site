@@ -1,4 +1,3 @@
-// app/api/calendar/recruitings/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import prisma from "@/lib/prisma";
@@ -16,107 +15,134 @@ type Session = {
   isActive?: boolean;
 };
 
+function getIdWhere(id: string) {
+  // id が数値でも文字列でも動くように（Prisma型差異の回避）
+  return /^\d+$/.test(id) ? Number(id) : id;
+}
+
+function jstMidnight(ymd: string) {
+  const [y, m, d] = ymd.split("-").map((v) => Number(v));
+  if (!y || !m || !d) throw new Error("Invalid date");
+  const utc = Date.UTC(y, m - 1, d, 0, 0, 0);
+  return new Date(utc - 9 * 60 * 60 * 1000);
+}
+
 async function getSession(): Promise<Session | null> {
-  const jar = await cookies();
+  const jar = await cookies(); // ← ここが重要
   const token = jar.get(COOKIE_NAME)?.value ?? "";
   const s = token ? await verifyToken(token) : null;
   return s ? (s as Session) : null;
 }
 
-// "2025-09-01" -> JST 00:00
-function jstDateOnly(s: string): Date {
-  const t = String(s ?? "").trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) throw new Error("不正な日付形式です（YYYY-MM-DD）");
-  return new Date(`${t}T00:00:00+09:00`);
-}
-
-// Date -> JST "YYYY-MM-DD"
-function toJstYmd(d?: Date | null): string | undefined {
-  if (!d) return undefined;
-  const t = d.getTime() + 9 * 60 * 60 * 1000;
-  return new Date(t).toISOString().slice(0, 10);
-}
-
-// 今日(JST)の00:00
-function jstToday00(): Date {
-  const now = Date.now();
-  const jst = new Date(now + 9 * 60 * 60 * 1000);
-  const y = jst.getUTCFullYear();
-  const m = String(jst.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(jst.getUTCDate()).padStart(2, "0");
-  return new Date(`${y}-${m}-${d}T00:00:00+09:00`);
+async function getLastUpdated(): Promise<string | null> {
+  // updatedAt が無いスキーマでも落ちないように try/catch
+  try {
+    const p = prisma as any;
+    const row = await p.recruiting.findFirst({
+      orderBy: { updatedAt: "desc" },
+      select: { updatedAt: true },
+    });
+    return row?.updatedAt ? new Date(row.updatedAt).toISOString() : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function GET(req: NextRequest) {
-  const me = await getSession();
-  const url = new URL(req.url);
-  const includeUnpublished = url.searchParams.get("all") === "1";
-  const where: any = {};
-
-  if (me?.role === "ADMIN" || me?.role === "EDITOR" || me?.isSuper) {
-    if (!includeUnpublished) {
-      // where.isPublished = true; // 必要なら開ける
-    }
-  } else {
-    where.isPublished = true;
-    where.deadline = { gte: jstToday00() };
+  const session = await getSession();
+  if (!session || !session.isActive) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (session.role === "VIEWER") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const rows = await prisma.recruiting.findMany({
-    where,
-    orderBy: [{ deadline: "asc" }, { createdAt: "asc" }],
-  });
+  const url = new URL(req.url);
+  const all = url.searchParams.get("all") === "1";
+  const yearParam = url.searchParams.get("year");
+  const year = yearParam ? Number(yearParam) : new Date().getFullYear();
 
-  const lastUpdated =
-    rows.reduce<Date | null>((acc, r) => (!acc || r.updatedAt > acc ? r.updatedAt : acc), null)?.toISOString() ?? null;
+  const p = prisma as any;
 
-  // ★ JST "YYYY-MM-DD"で返却
-  const items = rows.map((r) => ({
-    id: r.id,
-    title: r.title,
-    date: toJstYmd(r.date)!,                                   // 開始
-    endDate: toJstYmd((r as any).endDate ?? r.date),           // 終了（未設定は開始）
-    deadline: toJstYmd(r.deadline)!,                           // 締切
-    area: r.area,
-    url: r.url ?? undefined,
-    urlDesc: r.urlDesc ?? undefined,
-    imageUrl: r.imageUrl ?? undefined,
-    isPublished: r.isPublished,
-    createdAt: r.createdAt.toISOString(),
-    updatedAt: r.updatedAt.toISOString(),
-  }));
+  let items: any[] = [];
+  if (all) {
+    // 管理画面：全件（年で絞らない）
+    items = await p.recruiting.findMany({
+      orderBy: [{ deadline: "asc" }, { date: "asc" }],
+    });
+  } else {
+    // public / 年別など
+    const from = jstMidnight(`${year}-01-01`);
+    const to = jstMidnight(`${year + 1}-01-01`);
+    items = await p.recruiting.findMany({
+      where: { date: { gte: from, lt: to } },
+      orderBy: [{ date: "asc" }],
+    });
+  }
 
+  const lastUpdated = await getLastUpdated();
   return NextResponse.json({ items, lastUpdated });
 }
 
 export async function POST(req: NextRequest) {
-  const me = await getSession();
-  const ok = me && (me.role === "ADMIN" || me.role === "EDITOR" || me.isSuper);
-  if (!ok) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-
-  const b = await req.json().catch(() => ({} as any));
-  const { title, date, endDate, deadline, area, url, urlDesc, imageUrl, isPublished = true } = b ?? {};
-
-  if (!title?.trim() || !date || !deadline || !area?.trim()) {
-    return NextResponse.json({ error: "必須項目が未入力です" }, { status: 400 });
+  const session = await getSession();
+  if (!session || !session.isActive) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (session.role === "VIEWER") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  try {
-    const row = await prisma.recruiting.create({
-      data: {
-        title: String(title).trim(),
-        date: jstDateOnly(date),
-        ...(endDate ? { endDate: jstDateOnly(endDate) } : {}),
-        deadline: jstDateOnly(deadline),
-        area: String(area).trim(),
-        url: url ? String(url).trim() : null,
-        urlDesc: urlDesc ? String(urlDesc).trim() : null,
-        imageUrl: imageUrl ? String(imageUrl).trim() : null,
-        isPublished: Boolean(isPublished),
-      },
-    });
-    return NextResponse.json({ item: row });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "作成に失敗しました" }, { status: 500 });
+  const body = await req.json().catch(() => null);
+  if (!body) return NextResponse.json({ error: "Bad Request" }, { status: 400 });
+
+  // ✅ UI側が送る想定に合わせる
+  const {
+    title,
+    area,
+    publishFrom,
+    deadline,
+    date,
+    endDate,
+    url,
+    urlDesc,
+    imageUrl,
+    isPublished,
+  } = body as {
+    title: string;
+    area: string;
+    publishFrom: string; // YYYY-MM-DD
+    deadline: string;    // YYYY-MM-DD
+    date: string;        // YYYY-MM-DD
+    endDate?: string;    // YYYY-MM-DD
+    url?: string;
+    urlDesc?: string;
+    imageUrl?: string;
+    isPublished?: boolean;
+  };
+
+  if (!title || !area || !publishFrom || !deadline || !date) {
+    return NextResponse.json(
+      { error: "title, area, publishFrom, deadline, date are required" },
+      { status: 400 }
+    );
   }
+
+  const p = prisma as any;
+  const created = await p.recruiting.create({
+    data: {
+      title: String(title),
+      area: String(area),
+      publishFrom: jstMidnight(publishFrom),
+      deadline: jstMidnight(deadline),
+      date: jstMidnight(date),
+      endDate: jstMidnight(endDate || date),
+      url: url ? String(url) : null,
+      urlDesc: urlDesc ? String(urlDesc) : null,
+      imageUrl: imageUrl ? String(imageUrl) : null,
+      isPublished: isPublished !== false,
+    },
+  });
+
+  return NextResponse.json({ item: created }, { status: 201 });
 }

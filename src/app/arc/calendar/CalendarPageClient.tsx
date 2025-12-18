@@ -1,4 +1,3 @@
-// src/app/arc/calendar/CalendarPageClient.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -24,9 +23,10 @@ type EventItem = {
 type RecruitingItem = {
   id: string;
   title: string;
-  date: string;      // 実施開始（JST）
-  endDate?: string;  // 実施終了（JST）
-  deadline: string;  // 参加期限（JST）
+  date: string;         // 実施開始（JST）
+  endDate?: string;     // 実施終了（JST）
+  deadline: string;     // 参加期限（JST）= これが「消える日」
+  publishFrom?: string; // ✅ 掲載開始日（JST）= 予約投稿
   area: string;
   url?: string;
   urlDesc?: string;
@@ -64,8 +64,18 @@ function isExpiredJST(yyyy_mm_dd: string) {
   return Date.now() > endOfDayJst;
 }
 
+/** ✅ 掲載開始前か？（JSTの当日00:00:00から掲載開始） */
+function isNotStartedYetJST(yyyy_mm_dd?: string) {
+  if (!yyyy_mm_dd) return false; // publishFrom未設定なら「今すぐ表示」
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(yyyy_mm_dd)) return false;
+  const startOfDayJst = new Date(`${yyyy_mm_dd}T00:00:00+09:00`).getTime();
+  return Date.now() < startOfDayJst;
+}
+
 /** 文字列日付の比較（YYYY-MM-DD） */
-function cmp(a: string, b: string) { return a < b ? -1 : a > b ? 1 : 0; }
+function cmp(a: string, b: string) {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
 /** 文字列日付の between（含む） */
 function between(d: string, from: string, to: string) {
   return cmp(from, d) <= 0 && cmp(d, to) <= 0;
@@ -74,8 +84,12 @@ function between(d: string, from: string, to: string) {
 /** 単日/期間の整形表示（JST前提） */
 function formatDateRange(start: string, end?: string) {
   if (!end || end === start) return start;
-  const sY = start.slice(0, 4), sM = start.slice(5, 7), sD = start.slice(8, 10);
-  const eY = end.slice(0, 4),   eM = end.slice(5, 7),   eD = end.slice(8, 10);
+  const sY = start.slice(0, 4),
+    sM = start.slice(5, 7),
+    sD = start.slice(8, 10);
+  const eY = end.slice(0, 4),
+    eM = end.slice(5, 7),
+    eD = end.slice(8, 10);
   if (sY !== eY) return `${start} 〜 ${end}`;
   if (sM !== eM) return `${start} 〜 ${eM}-${eD}`;
   return `${start} 〜 ${eD}`;
@@ -94,9 +108,15 @@ function groupByMonth(events: EventItem[]) {
 
 /** 月カード（カレンダー年で色分け：今年=赤／来年=青／その他=グレー） */
 function MonthCard({
-  monthIndex, items = [], thisYear, nextYear,
+  monthIndex,
+  items = [],
+  thisYear,
+  nextYear,
 }: {
-  monthIndex: number; items: EventItem[]; thisYear: number; nextYear: number;
+  monthIndex: number;
+  items: EventItem[];
+  thisYear: number;
+  nextYear: number;
 }) {
   const monthName = `${monthIndex + 1}月`;
   return (
@@ -105,6 +125,7 @@ function MonthCard({
         <h3 className="text-base sm:text-lg font-bold text-gray-900">{monthName}</h3>
         <div className="h-[3px] w-8 bg-red-600 rounded-full" />
       </div>
+
       {items.length === 0 ? (
         <p className="text-[13px] sm:text-sm text-gray-500">予定は未登録です。</p>
       ) : (
@@ -114,10 +135,10 @@ function MonthCard({
             const type = y === thisYear ? "THIS" : y === nextYear ? "NEXT" : ("OTHER" as const);
             const dotClass =
               type === "THIS" ? "bg-rose-600" : type === "NEXT" ? "bg-sky-600" : "bg-slate-400";
+
             return (
               <li key={`${ev.date}-${i}`} className="text-[13px] sm:text-sm">
                 <div className="flex items-start gap-2">
-                  {/* 年は“ドット色”のみで表現。ツールチップで年がわかる */}
                   <span
                     className={`shrink-0 mt-[7px] inline-block h-2 w-2 rounded-full ${dotClass}`}
                     title={`${y}年`}
@@ -134,7 +155,9 @@ function MonthCard({
                         >
                           {ev.title}
                         </a>
-                      ) : (ev.title)}
+                      ) : (
+                        ev.title
+                      )}
                     </div>
                     <div className="text-gray-700">
                       {formatDateRange(ev.date, ev.endDate)}
@@ -156,7 +179,11 @@ async function safeJson(res: Response) {
   const ct = res.headers.get("content-type") || "";
   if (ct.includes("application/json")) return res.json();
   const text = await res.text();
-  try { return JSON.parse(text); } catch { return { error: text || "Unknown error" }; }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { error: text || "Unknown error" };
+  }
 }
 
 export default function CalendarPageClient() {
@@ -175,13 +202,15 @@ export default function CalendarPageClient() {
   const [recruitsUpdated, setRecruitsUpdated] = useState<string>("—");
 
   useEffect(() => {
-    // 表示範囲は“2年度ぶん”を確保（従来のままFYベースの広い期間を取得）
-    const thisYear = currentCalendarYearJST(); // 例：2025
+    // 表示範囲は“2年度ぶん”を確保
+    const thisYear = currentCalendarYearJST();
     const nextYear = thisYear + 1;
     const rangeFrom = `${thisYear}-04-01`;
-    const rangeTo   = `${nextYear + 1}-03-31`;
+    const rangeTo = `${nextYear + 1}-03-31`;
 
-    const y0 = thisYear, y1 = thisYear + 1, y2 = thisYear + 2;
+    const y0 = thisYear,
+      y1 = thisYear + 1,
+      y2 = thisYear + 2;
 
     // 年間スケジュール
     Promise.all([
@@ -190,7 +219,7 @@ export default function CalendarPageClient() {
       fetch(`${EVENTS_API_URL}?year=${y2}`, { cache: "no-store" }).then(safeJson),
     ])
       .then((arr) => {
-        const concat = arr.flatMap((j: any) => (j.items || []));
+        const concat = arr.flatMap((j: any) => j.items || []);
         const mapped: EventItem[] = concat.map((x: any) => {
           const start = isoToJstYmd(x.date)!;
           const end = isoToJstYmd(x.endDate) || start;
@@ -218,35 +247,50 @@ export default function CalendarPageClient() {
         setLastUpdated(max);
       })
       .catch(() => {
-        setEventsRaw([]); setLastUpdated("—");
+        setEventsRaw([]);
+        setLastUpdated("—");
       });
 
-    // 募集
+    // ✅ 募集（予約投稿：publishFrom が未来なら非表示 / deadlineで消える）
     fetch(RECRUIT_API_URL, { cache: "no-store" })
       .then(safeJson)
       .then((j) => {
-        const data: RecruitingItem[] = (j.items || []).map((x: any) => ({
-          id: String(x.id),
-          title: x.title,
-          date: isoToJstYmd(x.date)!,
-          endDate: isoToJstYmd(x.endDate) || isoToJstYmd(x.date),
-          deadline: isoToJstYmd(x.deadline)!,
-          area: x.area,
-          url: x.url || undefined,
-          urlDesc: x.urlDesc || undefined,
-          imageUrl: x.imageUrl || undefined,
-          isPublished: x?.isPublished !== false,
-        }));
+        const data: RecruitingItem[] = (j.items || []).map((x: any) => {
+          // API側のキー名が揺れても拾えるようにしておく
+          const publishFrom =
+            isoToJstYmd(x.publishFrom) ??
+            isoToJstYmd(x.publishAt) ??
+            isoToJstYmd(x.publishStart) ??
+            undefined;
+
+          return {
+            id: String(x.id),
+            title: x.title,
+            date: isoToJstYmd(x.date)!,
+            endDate: isoToJstYmd(x.endDate) || isoToJstYmd(x.date),
+            deadline: isoToJstYmd(x.deadline)!,
+            publishFrom,
+            area: x.area,
+            url: x.url || undefined,
+            urlDesc: x.urlDesc || undefined,
+            imageUrl: x.imageUrl || undefined,
+            isPublished: x?.isPublished !== false,
+          };
+        });
+
         setRecruitsRaw(
           data
             .filter((r) => r.isPublished !== false)
-            .filter((r) => !isExpiredJST(r.deadline))
+            .filter((r) => !isNotStartedYetJST(r.publishFrom)) // ✅ 掲載開始日まで待つ
+            .filter((r) => !isExpiredJST(r.deadline)) // ✅ 参加期限を過ぎたら消える
             .sort((a, b) => (a.deadline < b.deadline ? -1 : a.deadline > b.deadline ? 1 : 0))
         );
+
         setRecruitsUpdated(j.lastUpdated ? new Date(j.lastUpdated).toLocaleString() : "—");
       })
       .catch(() => {
-        setRecruitsRaw([]); setRecruitsUpdated("—");
+        setRecruitsRaw([]);
+        setRecruitsUpdated("—");
       });
   }, []);
 
@@ -274,10 +318,16 @@ export default function CalendarPageClient() {
           transition={{ duration: 0.9, ease: "easeOut" }}
           className="text-center"
         >
-          <h1 className="text-white font-extrabold drop-shadow-lg leading-tight" style={{ fontSize: "clamp(28px, 7vw, 48px)" }}>
+          <h1
+            className="text-white font-extrabold drop-shadow-lg leading-tight"
+            style={{ fontSize: "clamp(28px, 7vw, 48px)" }}
+          >
             事業カレンダー
           </h1>
-          <p className="text-white/90 font-medium mt-2 sm:mt-3" style={{ fontSize: "clamp(14px, 4.6vw, 24px)" }}>
+          <p
+            className="text-white/90 font-medium mt-2 sm:mt-3"
+            style={{ fontSize: "clamp(14px, 4.6vw, 24px)" }}
+          >
             ARC Annual Schedule & Recruiting
           </p>
         </motion.div>
@@ -286,10 +336,15 @@ export default function CalendarPageClient() {
       {/* 現在募集中 */}
       <section className="w-full bg-white py-10 sm:py-12 md:py-14 px-4 sm:px-6 md:px-10 lg:px-16">
         <div className="mx-auto max-w-6xl">
-          <h2 className="text-red-600 font-bold mb-2 sm:mb-3 leading-tight" style={{ fontSize: "clamp(22px, 4.8vw, 36px)" }}>
+          <h2
+            className="text-red-600 font-bold mb-2 sm:mb-3 leading-tight"
+            style={{ fontSize: "clamp(22px, 4.8vw, 36px)" }}
+          >
             現在募集中の案内
           </h2>
-          <p className="text-[13px] sm:text-sm text-gray-600 mb-4">※URLをクリックすると開催要項に移動できます</p>
+          <p className="text-[13px] sm:text-sm text-gray-600 mb-4">
+            ※URLをクリックすると開催要項に移動できます
+          </p>
 
           {recruitsRaw === null ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -299,17 +354,23 @@ export default function CalendarPageClient() {
             </div>
           ) : recruits.length === 0 ? (
             <div className="rounded-xl border border-gray-200 bg-white p-4 sm:p-5 shadow-sm">
-              <p className="text-gray-800 font-medium text-sm sm:text-base">現在募集している事業はありません。</p>
+              <p className="text-gray-800 font-medium text-sm sm:text-base">
+                現在募集している事業はありません。
+              </p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               {recruits.map((r) => (
-                <article key={r.id} className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+                <article
+                  key={r.id}
+                  className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden"
+                >
                   {r.imageUrl ? (
                     <div className="relative h-40 sm:h-48">
                       <Image src={r.imageUrl} alt={r.title} fill className="object-cover" />
                     </div>
                   ) : null}
+
                   <div className="p-4 sm:p-5">
                     <div className="-mx-2 px-2 flex items-center gap-2 overflow-x-auto snap-x snap-mandatory">
                       <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-700 border border-rose-200 whitespace-nowrap">
@@ -323,7 +384,10 @@ export default function CalendarPageClient() {
                       </span>
                     </div>
 
-                    <h3 className="mt-2 text-base sm:text-lg font-bold text-gray-900 break-keep">{r.title}</h3>
+                    <h3 className="mt-2 text-base sm:text-lg font-bold text-gray-900 break-keep">
+                      {r.title}
+                    </h3>
+
                     {r.url && (
                       <div className="mt-2 text-sm">
                         <a
@@ -343,21 +407,27 @@ export default function CalendarPageClient() {
           )}
 
           {recruitsRaw && (
-            <div className="mt-4 text-[12px] sm:text-xs text-gray-500">募集情報 最終更新：{recruitsUpdated}</div>
+            <div className="mt-4 text-[12px] sm:text-xs text-gray-500">
+              募集情報 最終更新：{recruitsUpdated}
+            </div>
           )}
         </div>
       </section>
 
-      {/* 年間スケジュール（カレンダー年で色凡例） */}
+      {/* 年間スケジュール */}
       <section className="w-full bg-white pb-10 sm:pb-12 md:pb-14 px-4 sm:px-6 md:px-10 lg:px-16">
         <div className="mx-auto max-w-6xl">
           <div className="flex items-end justify-between gap-3">
             <div>
-              <h2 className="text-gray-800 font-extrabold tracking-tight leading-tight" style={{ fontSize: "clamp(20px, 4.4vw, 30px)" }}>
+              <h2
+                className="text-gray-800 font-extrabold tracking-tight leading-tight"
+                style={{ fontSize: "clamp(20px, 4.4vw, 30px)" }}
+              >
                 年間スケジュール
               </h2>
               <div className="mt-2 h-[2px] w-16 bg-red-600 rounded-full" />
             </div>
+
             <div className="hidden sm:flex items-center gap-4 text-[12px] text-slate-600">
               <span className="inline-flex items-center gap-1">
                 <span className="inline-block h-2 w-2 rounded-full bg-rose-600" /> {thisYear}年
@@ -378,9 +448,16 @@ export default function CalendarPageClient() {
             <>
               <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
                 {Array.from({ length: 12 }).map((_, i) => (
-                  <MonthCard key={i} monthIndex={i} items={byMonth[i] ?? []} thisYear={thisYear} nextYear={nextYear} />
+                  <MonthCard
+                    key={i}
+                    monthIndex={i}
+                    items={byMonth[i] ?? []}
+                    thisYear={thisYear}
+                    nextYear={nextYear}
+                  />
                 ))}
               </div>
+
               <div className="mt-6 text-[13px] sm:text-sm text-gray-600">
                 最終更新日時：{lastUpdated}
                 <div className="mt-2 text-[12px] sm:text-xs text-gray-500 space-y-1">

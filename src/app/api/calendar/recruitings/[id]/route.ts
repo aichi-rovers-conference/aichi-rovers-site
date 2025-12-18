@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import prisma from "@/lib/prisma";
 import { verifyToken, COOKIE_NAME } from "@/lib/auth";
@@ -12,64 +12,98 @@ type Session = {
   username: string;
   role: "ADMIN" | "EDITOR" | "VIEWER";
   isSuper?: boolean;
+  isActive?: boolean;
 };
 
-async function requireEditor(): Promise<Session | null> {
-  const jar = await cookies();
-  const token = jar.get(COOKIE_NAME)?.value ?? "";
-  const s = token ? await verifyToken(token) : null;
-  if (!s) return null;
-  const ok = s.role === "ADMIN" || s.role === "EDITOR" || s.isSuper;
-  return ok ? (s as Session) : null;
+function jstMidnight(ymd: string) {
+  const [y, m, d] = ymd.split("-").map((v) => Number(v));
+  if (!y || !m || !d) throw new Error("Invalid date");
+  const utc = Date.UTC(y, m - 1, d, 0, 0, 0);
+  return new Date(utc - 9 * 60 * 60 * 1000);
 }
 
-function jstDateOnly(s: string): Date {
-  const t = String(s ?? "").trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) throw new Error("不正な日付形式です（YYYY-MM-DD）");
-  return new Date(`${t}T00:00:00+09:00`);
+function getIdWhere(id: string) {
+  return /^\d+$/.test(id) ? Number(id) : id;
+}
+
+async function getSession(): Promise<Session | null> {
+  const jar = await cookies(); // ← ここが重要
+  const token = jar.get(COOKIE_NAME)?.value ?? "";
+  const s = token ? await verifyToken(token) : null;
+  return s ? (s as Session) : null;
 }
 
 export async function PATCH(
-  req: Request,
-  { params }: { params: Promise<{ id: string }> }
+  req: NextRequest,
+  ctx: { params: { id: string } }
 ) {
-  const me = await requireEditor();
-  if (!me) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const session = await getSession();
+  if (!session || !session.isActive) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (session.role === "VIEWER") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
-  const { id } = await params;
-  const b = await req.json().catch(() => ({} as any));
+  const { id } = ctx.params;
+  const body = await req.json().catch(() => null);
+  if (!body) return NextResponse.json({ error: "Bad Request" }, { status: 400 });
+
+  const {
+    title,
+    area,
+    publishFrom,
+    deadline,
+    date,
+    endDate,
+    url,
+    urlDesc,
+    imageUrl,
+    isPublished,
+  } = body as any;
 
   const data: any = {};
-  if (b.title !== undefined) data.title = String(b.title).trim();
-  if (b.area !== undefined) data.area = String(b.area).trim();
-  if (b.date !== undefined) data.date = jstDateOnly(b.date);
-  if (b.deadline !== undefined) data.deadline = jstDateOnly(b.deadline);
-  if (b.url !== undefined) data.url = b.url ? String(b.url).trim() : null;
-  if (b.urlDesc !== undefined) data.urlDesc = b.urlDesc ? String(b.urlDesc).trim() : null;
-  if (b.imageUrl !== undefined) data.imageUrl = b.imageUrl ? String(b.imageUrl).trim() : null;
-  if (b.isPublished !== undefined) data.isPublished = Boolean(b.isPublished);
+  if (title !== undefined) data.title = String(title);
+  if (area !== undefined) data.area = String(area);
 
-  try {
-    const row = await prisma.recruiting.update({ where: { id }, data });
-    return NextResponse.json({ item: row });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "更新に失敗しました" }, { status: 500 });
-  }
+  if (publishFrom !== undefined) data.publishFrom = jstMidnight(String(publishFrom));
+  if (deadline !== undefined) data.deadline = jstMidnight(String(deadline));
+  if (date !== undefined) data.date = jstMidnight(String(date));
+  if (endDate !== undefined) data.endDate = jstMidnight(String(endDate));
+
+  if (url !== undefined) data.url = url ? String(url) : null;
+  if (urlDesc !== undefined) data.urlDesc = urlDesc ? String(urlDesc) : null;
+  if (imageUrl !== undefined) data.imageUrl = imageUrl ? String(imageUrl) : null;
+
+  if (isPublished !== undefined) data.isPublished = Boolean(isPublished);
+
+  const p = prisma as any;
+  const updated = await p.recruiting.update({
+    where: { id: getIdWhere(id) },
+    data,
+  });
+
+  return NextResponse.json({ item: updated });
 }
 
 export async function DELETE(
-  _req: Request,
-  { params }: { params: Promise<{ id: string }> }
+  req: NextRequest,
+  ctx: { params: { id: string } }
 ) {
-  const me = await requireEditor();
-  if (!me) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-
-  const { id } = await params;
-
-  try {
-    await prisma.recruiting.delete({ where: { id } });
-    return NextResponse.json({ ok: true });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "削除に失敗しました" }, { status: 500 });
+  const session = await getSession();
+  if (!session || !session.isActive) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  if (session.role === "VIEWER") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const { id } = ctx.params;
+
+  const p = prisma as any;
+  await p.recruiting.delete({
+    where: { id: getIdWhere(id) },
+  });
+
+  return NextResponse.json({ ok: true });
 }

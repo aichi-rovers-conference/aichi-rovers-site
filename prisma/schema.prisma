@@ -8,6 +8,45 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+enum SuggestionStatus {
+  NEW
+  REVIEWED
+  RESOLVED
+  SPAM
+}
+
+model Suggestion {
+  id           String           @id @default(cuid())
+
+  subject      String           @db.VarChar(80)
+  body         String           @db.VarChar(2000)
+
+  category     String?          @db.VarChar(40)
+  isAnonymous  Boolean          @default(true)
+  contactEmail String?          @db.VarChar(254)
+
+  ipHash       String?          @db.VarChar(64)
+  userAgent    String?          @db.VarChar(256)
+  origin       String?          @db.VarChar(80)
+
+  status       SuggestionStatus @default(NEW)
+  adminNote    String?          @db.VarChar(1000) // 運営内部メモ
+  reviewedAt   DateTime?
+
+  // ★滝ストリーム（公開）用
+  isPublic     Boolean          @default(false)
+  publicNote   String?          @db.VarChar(1000) // 公開してOKな「解決方法」
+  resolvedAt   DateTime?
+
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@index([status, createdAt])
+  @@index([createdAt])
+  @@index([isPublic, updatedAt]) // ★追加おすすめ
+}
+
+
 model ExecutiveMember {
   id String @id @default(cuid())
   name String
@@ -88,6 +127,7 @@ model Recruiting {
   isPublished Boolean   @default(true)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+  publishFrom DateTime  @default(now())
 
   @@index([deadline, isPublished])
   @@index([date])
