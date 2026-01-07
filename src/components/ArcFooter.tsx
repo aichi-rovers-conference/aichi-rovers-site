@@ -90,7 +90,7 @@ export default function ArcFooter() {
               Aichi Rovers Conference
             </div>
             <p className="mt-2 text-sm text-slate-500">
-              愛知連盟ローバース会議の公式サイト。行事の参加管理、QR受付、アーカイブ等を提供しています。
+              愛知ローバース会議の公式サイト。行事の参加管理、QR受付、アーカイブ等を提供しています。
             </p>
           </div>
 
