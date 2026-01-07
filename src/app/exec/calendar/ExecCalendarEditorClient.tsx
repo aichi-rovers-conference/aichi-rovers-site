@@ -26,10 +26,7 @@ type RecruitingItem = {
   date: string; // 実施開始 (JST)
   endDate?: string; // 実施終了（未指定=単日）
   deadline: string; // 参加期限 (JST)
-
-  // ✅ 追加：掲載開始（予約投稿）
-  publishFrom: string;
-
+  publishFrom: string; // ✅ 掲載開始（予約投稿）
   area: string;
   url?: string;
   urlDesc?: string;
@@ -65,9 +62,8 @@ function isNotStartedYetJST(publishFrom?: string) {
   return Date.now() < start;
 }
 
-// ====== 追加：年度またぎ（4月始まり）ユーティリティ ======
+// ====== 年度またぎ（4月始まり）ユーティリティ ======
 function currentFiscalYearJst(): number {
-  // JSTとして扱うため +9h して UTCフィールドを見る
   const d = new Date(Date.now() + 9 * 60 * 60 * 1000);
   const y = d.getUTCFullYear();
   const m = d.getUTCMonth() + 1; // 1..12
@@ -93,7 +89,6 @@ function formatDatePill(start: string, end?: string) {
     em = end.slice(5, 7),
     ed = end.slice(8, 10);
 
-  // 同じ年月なら「2026-03-13 ～ 15」形式にする
   if (sy === ey && sm === em) return `${start} ～ ${ed}`;
   return `${start} ～ ${end}`;
 }
@@ -194,11 +189,26 @@ export default function ExecCalendarEditorClient() {
   const [showExpired, setShowExpired] = useState(false);
 
   // ====== 年間スケジュール表示用（年度） ======
-  const [fiscalYear, setFiscalYear] = useState<number>(() => currentFiscalYearJst());
+  const baseFY = useMemo(() => currentFiscalYearJst(), []);
+  const [fiscalYear, setFiscalYear] = useState<number>(baseFY);
+
+  // FY（4→3）順に表示したい
+  const FY_MONTH_ORDER = useMemo(() => [4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3], []);
+
+  // 年度選択肢（将来も使う想定：現年度-2〜+10）
+  const fyOptions = useMemo(() => {
+    const start = baseFY - 2;
+    const end = baseFY + 10;
+    return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+  }, [baseFY]);
+
+  const yearA = fiscalYear;
+  const yearB = fiscalYear + 1;
+  const rangeLabel = `${yearA}-04-01 〜 ${yearB}-03-31`;
 
   // 追加フォーム（募集）
   const [openRecruitForm, setOpenRecruitForm] = useState(false);
-  const [rPublishFrom, setRPublishFrom] = useState<string>(todayJstYmd()); // ✅ 追加
+  const [rPublishFrom, setRPublishFrom] = useState<string>(todayJstYmd());
   const [rDeadline, setRDeadline] = useState<string>(todayJstYmd());
   const [rDate, setRDate] = useState<string>(todayJstYmd());
   const [rEndDate, setREndDate] = useState<string>(todayJstYmd());
@@ -214,7 +224,7 @@ export default function ExecCalendarEditorClient() {
   const [editingRecruitId, setEditingRecruitId] = useState<string | null>(null);
   const [editRecruit, setEditRecruit] = useState<Partial<RecruitingItem> | null>(null);
 
-  // ====== 追加：イベント（年間スケジュール）CRUD state ======
+  // ====== イベント（年間スケジュール）CRUD state ======
   const [openEventForm, setOpenEventForm] = useState(false);
 
   const [eDate, setEDate] = useState<string>(todayJstYmd());
@@ -240,7 +250,7 @@ export default function ExecCalendarEditorClient() {
       date: isoToJstYmd(x.date)!,
       endDate: isoToJstYmd(x.endDate) || isoToJstYmd(x.date),
       deadline: isoToJstYmd(x.deadline)!,
-      publishFrom: isoToJstYmd(x.publishFrom) || todayJstYmd(), // ✅
+      publishFrom: isoToJstYmd(x.publishFrom) || todayJstYmd(),
       area: String(x.area ?? ""),
       url: x.url || undefined,
       urlDesc: x.urlDesc || undefined,
@@ -308,7 +318,7 @@ export default function ExecCalendarEditorClient() {
     const payload = {
       title: rTitle,
       area: rArea,
-      publishFrom: rPublishFrom, // ✅
+      publishFrom: rPublishFrom,
       deadline: rDeadline,
       date: rDate,
       endDate: rMulti ? rEndDate : rDate,
@@ -355,7 +365,7 @@ export default function ExecCalendarEditorClient() {
     await loadRecruits();
   }
 
-  // ====== 追加：イベントCRUD ======
+  // ====== イベントCRUD ======
   async function createEvent() {
     const payload = {
       title: eTitle,
@@ -421,8 +431,11 @@ export default function ExecCalendarEditorClient() {
     for (let m = 1; m <= 12; m++) map.set(m, []);
     for (const e of fiscalEvents) {
       const m = Number(e.date.slice(5, 7));
-      if (!map.has(m)) map.set(m, []);
-      map.get(m)!.push(e);
+      map.get(m)?.push(e);
+    }
+    // 月内ソート（念のため）
+    for (const m of map.keys()) {
+      map.get(m)!.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     }
     return map;
   }, [fiscalEvents]);
@@ -721,17 +734,13 @@ export default function ExecCalendarEditorClient() {
                         />
                         <input
                           value={editRecruit.urlDesc ?? r.urlDesc ?? ""}
-                          onChange={(e) =>
-                            setEditRecruit((p) => ({ ...(p ?? {}), urlDesc: e.target.value }))
-                          }
+                          onChange={(e) => setEditRecruit((p) => ({ ...(p ?? {}), urlDesc: e.target.value }))}
                           className="h-10 w-full rounded-lg border border-slate-300 px-3"
                           placeholder="URL説明"
                         />
                         <input
                           value={editRecruit.imageUrl ?? r.imageUrl ?? ""}
-                          onChange={(e) =>
-                            setEditRecruit((p) => ({ ...(p ?? {}), imageUrl: e.target.value }))
-                          }
+                          onChange={(e) => setEditRecruit((p) => ({ ...(p ?? {}), imageUrl: e.target.value }))}
                           className="h-10 w-full rounded-lg border border-slate-300 px-3 sm:col-span-2"
                           placeholder="画像URL"
                         />
@@ -756,7 +765,7 @@ export default function ExecCalendarEditorClient() {
                                   date: editRecruit.date,
                                   endDate: editRecruit.endDate,
                                   deadline: editRecruit.deadline,
-                                  publishFrom: editRecruit.publishFrom, // ✅
+                                  publishFrom: editRecruit.publishFrom,
                                   url: editRecruit.url,
                                   urlDesc: editRecruit.urlDesc,
                                   imageUrl: editRecruit.imageUrl,
@@ -786,23 +795,25 @@ export default function ExecCalendarEditorClient() {
         {/* 年間スケジュール（イベント） */}
         <section className="mt-8 rounded-3xl border border-slate-200 bg-slate-50/70 p-4 sm:p-6">
           <SectionHeader
-            title="年間スケジュール"
-            subtitle="日付（青）→次の行に事業名。年度またぎも一括表示。"
+            title={`年間スケジュール（${fiscalYear}年度）`}
+            subtitle={`4月始まりで表示します（表示範囲：${rangeLabel}）`}
             right={
-              <PrimaryButton
-                className="h-12 px-6 rounded-2xl"
-                icon={<Plus size={18} />}
-                onClick={() => setOpenEventForm((v) => !v)}
-              >
-                {openEventForm ? "追加フォームを閉じる" : "スケジュールを追加"}
-              </PrimaryButton>
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
+                <PrimaryButton
+                  className="h-12 px-6 rounded-2xl"
+                  icon={<Plus size={18} />}
+                  onClick={() => setOpenEventForm((v) => !v)}
+                >
+                  {openEventForm ? "追加フォームを閉じる" : "スケジュールを追加"}
+                </PrimaryButton>
+              </div>
             }
           />
 
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-slate-600">
+          <div className="mt-3 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 text-sm text-slate-600">
             <div>スケジュール最終更新：{eventsUpdated}</div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 className="h-9 px-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50"
                 onClick={() => setFiscalYear((y) => y - 1)}
@@ -810,7 +821,20 @@ export default function ExecCalendarEditorClient() {
               >
                 ←
               </button>
-              <div className="font-semibold text-slate-900">{fiscalYear}年度</div>
+
+              <select
+                value={fiscalYear}
+                onChange={(e) => setFiscalYear(Number(e.target.value))}
+                className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 shadow-sm"
+                title="年度を選択"
+              >
+                {fyOptions.map((fy) => (
+                  <option key={fy} value={fy}>
+                    {fy}年度（{fy}-04〜{fy + 1}-03）
+                  </option>
+                ))}
+              </select>
+
               <button
                 className="h-9 px-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50"
                 onClick={() => setFiscalYear((y) => y + 1)}
@@ -841,7 +865,13 @@ export default function ExecCalendarEditorClient() {
                     <input
                       type="date"
                       value={eDate}
-                      onChange={(e) => setEDate(e.target.value)}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setEDate(v);
+                        // 入力日付の年度へ自動追従（新規追加の体験が良くなる）
+                        const fy = fiscalYearFromYmd(v);
+                        if (fy != null) setFiscalYear(fy);
+                      }}
                       className="h-10 w-full rounded-lg border border-sky-300 bg-white px-3"
                     />
                     {eMulti && (
@@ -852,6 +882,10 @@ export default function ExecCalendarEditorClient() {
                         className="h-10 w-full rounded-lg border border-sky-300 bg-white px-3"
                       />
                     )}
+                  </div>
+
+                  <div className="mt-2 text-[12px] text-slate-600">
+                    いま表示している年度：<b className="text-slate-900">{fiscalYear}年度</b>
                   </div>
                 </fieldset>
 
@@ -905,16 +939,26 @@ export default function ExecCalendarEditorClient() {
             </div>
           )}
 
-          {/* 月ごと表示（レスポンシブ対応：編集フォームは“下に全幅”） */}
+          {/* 月ごと表示（4月→3月の順） */}
           <div className="mt-5 grid grid-cols-1 xl:grid-cols-2 gap-4">
-            {Array.from({ length: 12 }, (_, i) => i + 1).map((month) => {
+            {FY_MONTH_ORDER.map((month) => {
               const list = eventsByMonth.get(month) ?? [];
+              const monthYear = month >= 4 ? yearA : yearB;
+
               return (
                 <div
-                  key={month}
+                  key={`${fiscalYear}-${month}`}
                   className="h-full rounded-2xl border border-slate-200 bg-white p-4 sm:p-5"
                 >
-                  <div className="text-lg font-extrabold text-slate-900">{month}月</div>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <div className="text-lg font-extrabold text-slate-900">
+                      {month}月
+                      <span className="ml-2 text-sm font-semibold text-slate-500">{monthYear}年</span>
+                    </div>
+                    <span className="text-xs rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-slate-600">
+                      {month >= 4 ? `${yearA}年度側` : `${yearB}年（年度後半）`}
+                    </span>
+                  </div>
 
                   {list.length === 0 ? (
                     <div className="mt-2 text-sm text-slate-500">予定は未登録です。</div>
@@ -923,164 +967,164 @@ export default function ExecCalendarEditorClient() {
                       {list.map((ev) => {
                         const isEditing = editingEventId === ev.id;
 
-                      return (
-                        <div key={ev.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-3 sm:p-4">
-                          {/* 上段：内容 + 操作（狭い幅では縦積み） */}
-                          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_auto] gap-3 items-start">
-                            <div className="min-w-0">
-                              <div className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-sm font-semibold text-sky-700">
-                                {formatDatePill(ev.date, ev.endDate)}
+                        return (
+                          <div key={ev.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-3 sm:p-4">
+                            {/* 上段：内容 + 操作 */}
+                            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_auto] gap-3 items-start">
+                              <div className="min-w-0">
+                                <div className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-sm font-semibold text-sky-700">
+                                  {formatDatePill(ev.date, ev.endDate)}
+                                </div>
+                                <div className="mt-2 text-lg font-extrabold text-slate-900 break-words">
+                                  {ev.title}
+                                </div>
                               </div>
-                              <div className="mt-2 text-lg font-extrabold text-slate-900 break-words">
-                                {ev.title}
+
+                              <div className="flex flex-wrap items-center justify-start lg:justify-end gap-2">
+                                <PublishToggle
+                                  checked={ev.isPublished !== false}
+                                  onChange={async (next) => {
+                                    try {
+                                      await patchEvent(ev.id, { isPublished: next });
+                                    } catch (e: any) {
+                                      alert(e?.message || "更新に失敗しました");
+                                    }
+                                  }}
+                                />
+                                <button
+                                  className="inline-flex items-center gap-1 px-3 h-10 rounded-xl border border-slate-200 hover:bg-slate-50 whitespace-nowrap shrink-0"
+                                  onClick={() => {
+                                    setEditingEventId(isEditing ? null : ev.id);
+                                    setEditEvent(isEditing ? null : { ...ev });
+                                  }}
+                                  type="button"
+                                >
+                                  <Pencil size={16} /> 編集
+                                </button>
+                                <button
+                                  className="inline-flex items-center gap-1 px-3 h-10 rounded-xl border border-rose-200 text-rose-700 hover:bg-rose-50 whitespace-nowrap shrink-0"
+                                  onClick={async () => {
+                                    try {
+                                      await deleteEvent(ev.id);
+                                    } catch (e: any) {
+                                      alert(e?.message || "削除に失敗しました");
+                                    }
+                                  }}
+                                  type="button"
+                                >
+                                  <Trash2 size={16} /> 削除
+                                </button>
                               </div>
                             </div>
 
-                            <div className="flex flex-wrap items-center justify-start lg:justify-end gap-2">
-                              <PublishToggle
-                                checked={ev.isPublished !== false}
-                                onChange={async (next) => {
-                                  try {
-                                    await patchEvent(ev.id, { isPublished: next });
-                                  } catch (e: any) {
-                                    alert(e?.message || "更新に失敗しました");
-                                  }
-                                }}
-                              />
-                              <button
-                                className="inline-flex items-center gap-1 px-3 h-10 rounded-xl border border-slate-200 hover:bg-slate-50 whitespace-nowrap shrink-0"
-                                onClick={() => {
-                                  setEditingEventId(isEditing ? null : ev.id);
-                                  setEditEvent(isEditing ? null : { ...ev });
-                                }}
-                                type="button"
-                              >
-                                <Pencil size={16} /> 編集
-                              </button>
-                              <button
-                                className="inline-flex items-center gap-1 px-3 h-10 rounded-xl border border-rose-200 text-rose-700 hover:bg-rose-50 whitespace-nowrap shrink-0"
-                                onClick={async () => {
-                                  try {
-                                    await deleteEvent(ev.id);
-                                  } catch (e: any) {
-                                    alert(e?.message || "削除に失敗しました");
-                                  }
-                                }}
-                                type="button"
-                              >
-                                <Trash2 size={16} /> 削除
-                              </button>
-                            </div>
-                          </div>
-        
-                          {/* 下段：編集フォーム（必ず全幅） */}
-                          {isEditing && editEvent && (
-                            <div className="mt-3 w-full rounded-2xl border border-slate-200 bg-white p-3 sm:p-4">
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <fieldset className="sm:col-span-2 rounded-xl border border-sky-200 bg-sky-50 p-3">
-                                  <div className="text-xs font-bold text-sky-700">日付</div>
-                                  <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                    <input
-                                      type="date"
-                                      value={editEvent.date ?? ev.date}
-                                      onChange={(e) =>
-                                        setEditEvent((p) => ({ ...(p ?? {}), date: e.target.value }))
-                                      }
-                                      className="h-10 w-full rounded-lg border border-sky-300 bg-white px-3"
-                                    />
-                                    <input
-                                      type="date"
-                                      value={editEvent.endDate ?? ev.endDate ?? ev.date}
-                                      onChange={(e) =>
-                                        setEditEvent((p) => ({ ...(p ?? {}), endDate: e.target.value }))
-                                      }
-                                      className="h-10 w-full rounded-lg border border-sky-300 bg-white px-3"
-                                    />
-                                  </div>
-                                </fieldset>
-        
-                                <input
-                                  value={editEvent.title ?? ev.title}
-                                  onChange={(e) =>
-                                    setEditEvent((p) => ({ ...(p ?? {}), title: e.target.value }))
-                                  }
-                                  className="h-10 w-full rounded-lg border border-slate-300 px-3 sm:col-span-2"
-                                  placeholder="事業名"
-                                />
-        
-                                <input
-                                  value={editEvent.area ?? ev.area ?? ""}
-                                  onChange={(e) =>
-                                    setEditEvent((p) => ({ ...(p ?? {}), area: e.target.value }))
-                                  }
-                                  className="h-10 w-full rounded-lg border border-slate-300 px-3"
-                                  placeholder="エリア"
-                                />
-        
-                                <input
-                                  value={editEvent.url ?? ev.url ?? ""}
-                                  onChange={(e) =>
-                                    setEditEvent((p) => ({ ...(p ?? {}), url: e.target.value }))
-                                  }
-                                  className="h-10 w-full rounded-lg border border-slate-300 px-3"
-                                  placeholder="URL"
-                                />
-        
-                                <textarea
-                                  value={editEvent.note ?? ev.note ?? ""}
-                                  onChange={(e) =>
-                                    setEditEvent((p) => ({ ...(p ?? {}), note: e.target.value }))
-                                  }
-                                  className="w-full rounded-lg border border-slate-300 px-3 py-2 sm:col-span-2"
-                                  rows={3}
-                                  placeholder="メモ"
-                                />
-        
-                                <div className="sm:col-span-2 flex flex-wrap justify-end gap-2">
-                                  <button
-                                    className="h-10 px-4 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 whitespace-nowrap"
-                                    onClick={() => {
-                                      setEditingEventId(null);
-                                      setEditEvent(null);
-                                    }}
-                                    type="button"
-                                  >
-                                    キャンセル
-                                  </button>
-                                  <PrimaryButton
-                                    onClick={async () => {
-                                      try {
-                                        const patch = {
-                                          title: editEvent.title,
-                                          date: editEvent.date,
-                                          endDate: editEvent.endDate,
-                                          note: editEvent.note,
-                                          area: editEvent.area,
-                                          url: editEvent.url,
-                                        } as any;
-                                        await patchEvent(ev.id, patch);
+                            {/* 下段：編集フォーム（必ず全幅） */}
+                            {isEditing && editEvent && (
+                              <div className="mt-3 w-full rounded-2xl border border-slate-200 bg-white p-3 sm:p-4">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  <fieldset className="sm:col-span-2 rounded-xl border border-sky-200 bg-sky-50 p-3">
+                                    <div className="text-xs font-bold text-sky-700">日付</div>
+                                    <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                      <input
+                                        type="date"
+                                        value={editEvent.date ?? ev.date}
+                                        onChange={(e) =>
+                                          setEditEvent((p) => ({ ...(p ?? {}), date: e.target.value }))
+                                        }
+                                        className="h-10 w-full rounded-lg border border-sky-300 bg-white px-3"
+                                      />
+                                      <input
+                                        type="date"
+                                        value={editEvent.endDate ?? ev.endDate ?? ev.date}
+                                        onChange={(e) =>
+                                          setEditEvent((p) => ({ ...(p ?? {}), endDate: e.target.value }))
+                                        }
+                                        className="h-10 w-full rounded-lg border border-sky-300 bg-white px-3"
+                                      />
+                                    </div>
+                                  </fieldset>
+
+                                  <input
+                                    value={editEvent.title ?? ev.title}
+                                    onChange={(e) =>
+                                      setEditEvent((p) => ({ ...(p ?? {}), title: e.target.value }))
+                                    }
+                                    className="h-10 w-full rounded-lg border border-slate-300 px-3 sm:col-span-2"
+                                    placeholder="事業名"
+                                  />
+
+                                  <input
+                                    value={editEvent.area ?? ev.area ?? ""}
+                                    onChange={(e) =>
+                                      setEditEvent((p) => ({ ...(p ?? {}), area: e.target.value }))
+                                    }
+                                    className="h-10 w-full rounded-lg border border-slate-300 px-3"
+                                    placeholder="エリア"
+                                  />
+
+                                  <input
+                                    value={editEvent.url ?? ev.url ?? ""}
+                                    onChange={(e) =>
+                                      setEditEvent((p) => ({ ...(p ?? {}), url: e.target.value }))
+                                    }
+                                    className="h-10 w-full rounded-lg border border-slate-300 px-3"
+                                    placeholder="URL"
+                                  />
+
+                                  <textarea
+                                    value={editEvent.note ?? ev.note ?? ""}
+                                    onChange={(e) =>
+                                      setEditEvent((p) => ({ ...(p ?? {}), note: e.target.value }))
+                                    }
+                                    className="w-full rounded-lg border border-slate-300 px-3 py-2 sm:col-span-2"
+                                    rows={3}
+                                    placeholder="メモ"
+                                  />
+
+                                  <div className="sm:col-span-2 flex flex-wrap justify-end gap-2">
+                                    <button
+                                      className="h-10 px-4 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 whitespace-nowrap"
+                                      onClick={() => {
                                         setEditingEventId(null);
                                         setEditEvent(null);
-                                      } catch (e: any) {
-                                        alert(e?.message || "更新に失敗しました");
-                                      }
-                                    }}
-                                  >
-                                    保存
-                                  </PrimaryButton>
+                                      }}
+                                      type="button"
+                                    >
+                                      キャンセル
+                                    </button>
+                                    <PrimaryButton
+                                      onClick={async () => {
+                                        try {
+                                          const patch = {
+                                            title: editEvent.title,
+                                            date: editEvent.date,
+                                            endDate: editEvent.endDate,
+                                            note: editEvent.note,
+                                            area: editEvent.area,
+                                            url: editEvent.url,
+                                          } as any;
+                                          await patchEvent(ev.id, patch);
+                                          setEditingEventId(null);
+                                          setEditEvent(null);
+                                        } catch (e: any) {
+                                          alert(e?.message || "更新に失敗しました");
+                                        }
+                                      }}
+                                    >
+                                      保存
+                                    </PrimaryButton>
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </section>
       </main>
     </div>
