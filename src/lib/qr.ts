@@ -1,4 +1,41 @@
 // src/lib/qr.ts（追記/修正）
+
+// src/lib/qr.ts
+
+// 参加者に見せるQRページのベースパス（必要なら .env で変更できるように）
+const PREVIEW_BASE_PATH =
+  process.env.NEXT_PUBLIC_QR_PREVIEW_BASE_PATH ?? "/p";
+
+/**
+ * 参加者向けの「QR表示ページ」のURLを作る
+ * 例: https://example.com/p/<participantId>?meeting=R7-3
+ *
+ * ※もしあなたの実装が /exec/meetings/qr/p/... なら
+ *   NEXT_PUBLIC_QR_PREVIEW_BASE_PATH="/exec/meetings/qr/p"
+ *   にすればOK
+ */
+export function buildPreviewQrUrl(origin: string, meeting: string, participantId: string) {
+  const base = (origin || "").replace(/\/$/, "");
+  const basePath = PREVIEW_BASE_PATH.startsWith("/") ? PREVIEW_BASE_PATH : `/${PREVIEW_BASE_PATH}`;
+  return `${base}${basePath}/${encodeURIComponent(participantId)}?meeting=${encodeURIComponent(meeting)}`;
+}
+
+/**
+ * ✅ スキャン側(scan-client.tsx)が要求している JSON 形式のQR文字列
+ * payload.type === "arc-attendance"
+ * payload.meeting / payload.participantId 必須
+ * payload.name は表示用として任意
+ */
+export function buildQrPayload(meeting: string, participantId: string, name?: string) {
+  return JSON.stringify({
+    type: "arc-attendance",
+    meeting,
+    participantId,
+    ...(name ? { name } : {}),
+  });
+}
+
+
 export type QrPayloadV1 = {
   v: 1;
   meeting: string;
@@ -8,20 +45,7 @@ export type QrPayloadV1 = {
 
 const PREFIX = "ARCQR:";
 
-// ✅ 既存の buildQrPayload をこの形に置き換え（name を任意で含める）
-export function buildQrPayload(meeting: string, participantId: string, name?: string) {
-  // scan-client.tsx が payload.type === "arc-attendance" を要求しているので合わせる
-  const payload: any = {
-    type: "arc-attendance",
-    meeting,
-    participantId,
-  };
 
-  // ✅ 名前を入れたい時だけ入れる
-  if (name) payload.name = name;
-
-  return JSON.stringify(payload);
-}
 
 // ✅ スキャン側で使う（新旧互換）
 export function parseQrPayload(raw: string): QrPayloadV1 | null {
