@@ -644,3 +644,56 @@
 .bodyInput::placeholder {
   color: rgba(0,0,0,0.30) !important;
 }
+
+/* ===== Mobile fix: 押せない/空きすぎ問題を解消 ===== */
+@media (max-width: 900px) {
+  /* 1) 画面外に行ったらスクロールできるようにする */
+  .stage {
+    height: auto !important;
+    min-height: 100svh !important;              /* iOSのアドレスバー変動に強い */
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    overflow-x: hidden !important;
+  }
+
+  /* absoluteで固定してたのを “普通に流れる” 形に */
+  .center {
+    position: relative !important;
+    inset: auto !important;
+    height: auto !important;
+
+    /* 看板分の上余白：端末の縦に応じて可変 */
+    padding-top: clamp(210px, 32svh, 280px) !important;
+    padding-bottom: 90px !important; /* 下に余白（送信ボタンが隠れない） */
+  }
+
+  .form {
+    width: min(440px, 92vw) !important;
+    transform: none !important;
+  }
+
+  /* 2) 件名と本文の “間が空きすぎ” を可変で詰める */
+  .scrollField {
+    margin-top: clamp(16px, 2.2svh, 44px) !important;
+  }
+
+  .scrollFieldBody {
+    margin-top: clamp(10px, 1.8svh, 22px) !important;
+  }
+
+  /* 3) 送信ボタンが必ず押せるように：下に張り付く（スクロールしながらも押せる） */
+  .actions {
+    position: sticky !important;
+    bottom: calc(env(safe-area-inset-bottom) + 12px) !important;
+    z-index: 60 !important;
+    margin-top: 12px !important;
+    padding-bottom: 10px !important;
+  }
+
+  /* タップ反応を良くする（端末差対策） */
+  .submitBtn,
+  .forestMenuBtn,
+  .forestSettingBtn {
+    touch-action: manipulation;
+  }
+}
