@@ -14,8 +14,8 @@ const navItems = [
   { name: "事業カレンダー", path: "/arc/calendar" },
   { name: "ARC定例会", path: "/arc/conference" },
   { name: "ARC運営委員会", path: "/arc/executive-committee" },
-  { name: "ARCアンケート", path: "/polls" },
-  { name: "ミニゲーム", path: "/games" },
+  // { name: "ARCアンケート", path: "/polls" },
+  // { name: "ミニゲーム", path: "/games" },
   { name: "目安箱", path: "/suggestion-box"},
 ];
 

@@ -2,13 +2,14 @@
 
 import Image from "next/image";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import styles from "./ArcSuggestionBox.module.css";
 import Link from "next/link";
+import styles from "./ArcSuggestionBox.module.css";
 
 type SendStatus = "idle" | "sending" | "sent" | "error";
+type Layout = { scale: number; offsetX: number; offsetY: number; mode: "landscape" | "portrait" };
+
 type OverlayRect = { x: number; y: number; w: number; h: number };
 type StreamRect = { x: number; y: number; w: number; h: number };
-type Layout = { scale: number; offsetX: number; offsetY: number; mode: "landscape" | "portrait" };
 
 // 旧データが混ざっても落ちないように IN_PROGRESS も許容（表示は REVIEWED 相当）
 type SuggestionStatus = "NEW" | "REVIEWED" | "RESOLVED" | "SPAM" | "IN_PROGRESS";
@@ -18,7 +19,7 @@ type PublicItem = {
   subject: string;
   category: string | null;
   status: SuggestionStatus;
-  publicNote: string | null; // 公開用の解決コメント
+  publicNote: string | null;
   createdAt: string;
   updatedAt: string;
   resolvedAt: string | null;
@@ -26,16 +27,21 @@ type PublicItem = {
 
 const SHOW_PUBLIC_STREAM = false;
 
+// =========================
+// 背景画像に合わせた座標（画像座標系）
+// =========================
 const LANDSCAPE = {
   src: "/images/arc-board.png",
   w: 2048,
   h: 1117,
+
   title: { x: 1024, y: 0.18 * 1117, w: 0.46 * 2048 },
+  meta: { x: 1024, y: 0.73 * 1117, w: 0.56 * 2048 },
+
   subject: { x: 0.359 * 2048, y: 0.384 * 1117, w: 0.285 * 2048, h: 0.069 * 1117 } satisfies OverlayRect,
   body: { x: 0.356 * 2048, y: 0.517 * 1117, w: 0.289 * 2048, h: 0.234 * 1117 } satisfies OverlayRect,
   button: { x: 1024, y: 0.805 * 1117 },
 
-  // ★中央フォームに絶対かぶらない “左だけ” の領域（狭め）
   stream: { x: 0.015 * 2048, y: 0.11 * 1117, w: 0.27 * 2048, h: 0.86 * 1117 } satisfies StreamRect,
 } as const;
 
@@ -43,12 +49,18 @@ const PORTRAIT = {
   src: "/images/arc-board-portrait.png",
   w: 1373,
   h: 2048,
-  title: { x: 1373 / 2, y: 0.23 * 2048, w: 0.82 * 1373 },
+
+  // 木の看板中央あたり
+  title: { x: 1373 / 2, y: 0.215 * 2048, w: 0.82 * 1373 },
+
+  // 看板〜件名の間（画像の雰囲気に合わせやすい）
+  meta: { x: 1373 / 2, y: 0.325 * 2048, w: 0.80 * 1373 },
+
   subject: { x: 0.255 * 1373, y: 0.372 * 2048, w: 0.49 * 1373, h: 0.046 * 2048 } satisfies OverlayRect,
-  body: { x: 0.257 * 1373, y: 0.48 * 2048, w: 0.486 * 1373, h: 0.158 * 2048 } satisfies OverlayRect,
+  body: { x: 0.257 * 1373, y: 0.505 * 2048, w: 0.486 * 1373, h: 0.200 * 2048 } satisfies OverlayRect,
   button: { x: 1373 / 2, y: 0.685 * 2048 },
 
-  // 縦は邪魔になりやすいので一応小さめにしておく（ただし今回は縦では流さない設定にしてる）
+  // 縦は邪魔になりやすいので小さめ（ただし今回は縦では流さない設定）
   stream: { x: 0.06 * 1373, y: 0.06 * 2048, w: 0.40 * 1373, h: 0.28 * 2048 } satisfies StreamRect,
 } as const;
 
@@ -146,25 +158,23 @@ function usePublicStream(enabled: boolean) {
   return items;
 }
 
-
 /**
  * ★途切れない上→下ストリーム（無限マルキー）
  * - 同じリストを2回並べる
- * - translateY(-50%) → 0 を無限ループ（上が空かない）
+ * - translateY(-50%) → 0 を無限ループ
  */
 function LeftStream({
-  rect,
+  rectPx,
   items,
   enabled,
 }: {
-  rect: StreamRect;
+  rectPx: { left: number; top: number; width: number; height: number };
   items: PublicItem[];
   enabled: boolean;
 }) {
   const list = useMemo<PublicItem[]>(() => {
     const now = new Date().toISOString();
 
-    // ★最初から埋めるためのプレースホルダは “多め” に用意する（ここ重要）
     const placeholder: PublicItem[] = Array.from({ length: 80 }, (_, i) => ({
       id: `_placeholder_${i}`,
       subject: "公開された投稿がここに流れます",
@@ -178,7 +188,6 @@ function LeftStream({
 
     const base: PublicItem[] = items.length > 0 ? items : placeholder;
 
-    // ★少ないと初期表示で空白が出るので、常に最低件数まで増やす
     const MIN = 80;
     const count = Math.max(MIN, base.length);
     return Array.from({ length: count }, (_, i) => base[i % base.length]);
@@ -186,7 +195,6 @@ function LeftStream({
 
   if (!enabled) return null;
 
-  // ★ゆっくり（好きに調整OK：大きいほど遅い）
   const durSec = 70;
 
   const Card = ({ it }: { it: PublicItem }) => {
@@ -213,7 +221,7 @@ function LeftStream({
   return (
     <div
       className={styles.streamRegion}
-      style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}
+      style={{ left: rectPx.left, top: rectPx.top, width: rectPx.width, height: rectPx.height }}
       aria-hidden
     >
       <div
@@ -249,18 +257,23 @@ export default function ArcSuggestionBox() {
 
   const [sendStatus, setSendStatus] = useState<SendStatus>("idle");
   const [message, setMessage] = useState("");
+
+  // 背景は cover で拡大縮小、フォームは “縮めない” ため座標変換だけ持つ
   const [layout, setLayout] = useState<Layout>({ scale: 1, offsetX: 0, offsetY: 0, mode: "landscape" });
+
   const [showMeta, setShowMeta] = useState(false);
 
   const HINT_KEY = "arc_sbox_meta_hint_seen";
   const [showMetaHint, setShowMetaHint] = useState(false);
 
   const PORTRAIT_MAX_WIDTH = 900;
+
   const cfg = useMemo(() => (layout.mode === "portrait" ? PORTRAIT : LANDSCAPE), [layout.mode]);
 
   const streamEnabled = SHOW_PUBLIC_STREAM && layout.mode === "landscape";
   const streamItems = usePublicStream(streamEnabled);
 
+  // cover と同じ計算で “画像座標 → 画面px” の変換係数を作る
   useEffect(() => {
     const el = stageRef.current;
     if (!el) return;
@@ -274,7 +287,7 @@ export default function ArcSuggestionBox() {
       const mode: Layout["mode"] = usePortrait ? "portrait" : "landscape";
       const c = usePortrait ? PORTRAIT : LANDSCAPE;
 
-      const scale = Math.max(w / c.w, h / c.h);
+      const scale = Math.max(w / c.w, h / c.h); // object-fit: cover と同じ
       const renderedW = c.w * scale;
       const renderedH = c.h * scale;
 
@@ -288,6 +301,7 @@ export default function ArcSuggestionBox() {
     return () => ro.disconnect();
   }, []);
 
+  // 初回だけヒント
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (localStorage.getItem(HINT_KEY) === "1") return;
@@ -312,6 +326,29 @@ export default function ArcSuggestionBox() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [showMeta]);
+
+  // =========================
+  // 画像座標 → 画面(px) 変換
+  // =========================
+  const sx = (x: number) => layout.offsetX + x * layout.scale;
+  const sy = (y: number) => layout.offsetY + y * layout.scale;
+
+  function rectPx(r: OverlayRect, opts?: { minH?: number; minW?: number }) {
+    const baseW = r.w * layout.scale;
+    const baseH = r.h * layout.scale;
+
+    const w = Math.max(baseW, opts?.minW ?? 0);
+    const h = Math.max(baseH, opts?.minH ?? 0);
+
+    const left = sx(r.x) - (w - baseW) / 2;
+    const top = sy(r.y) - (h - baseH) / 2;
+
+    return { left, top, width: w, height: h };
+  }
+
+  function pointPx(p: { x: number; y: number }) {
+    return { left: sx(p.x), top: sy(p.y) };
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -380,73 +417,45 @@ export default function ArcSuggestionBox() {
     }
   }
 
-  const optionPillTop = cfg.button.y - (layout.mode === "portrait" ? 135 : 105);
+  const streamRectPx = {
+    left: sx(cfg.stream.x),
+    top: sy(cfg.stream.y),
+    width: cfg.stream.w * layout.scale,
+    height: cfg.stream.h * layout.scale,
+  };
 
-  // ★縦画面は崩れやすいので流さない（ここを true にすれば縦でも流れる）
- 
+  
 
   return (
     <div className={styles.page}>
       <div ref={stageRef} className={styles.stage}>
-        {/* 左上：ホームに戻る */}
-        <div style={{ position: "absolute", left: 14, top: 14, zIndex: 30 }}>
-          <Link
-            href="/"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "10px 12px",
-              borderRadius: 999,
-              border: "1px solid rgba(0,0,0,0.15)",
-              background: "rgba(255,255,255,0.92)",
-              backdropFilter: "blur(8px)",
-              fontWeight: 900,
-              cursor: "pointer",
-              boxShadow: "0 10px 26px rgba(0,0,0,0.12)",
-              textDecoration: "none",
-              color: "inherit",
-            }}
-            aria-label="ホームに戻る"
-          >
+        {/* 背景 */}
+        <Image src={cfg.src} alt="" fill priority sizes="100vw" className={styles.bg} />
+
+        {/* 左上：ホーム */}
+        <div
+          style={{
+            position: "absolute",
+            left: "calc(env(safe-area-inset-left) + 12px)",
+            top: "calc(env(safe-area-inset-top) + 12px)",
+            zIndex: 30,
+          }}
+        >
+          <Link href="/" className={styles.topPill} aria-label="ホームに戻る">
             ← ホーム
           </Link>
         </div>
-        <Image src={cfg.src} alt="" fill priority sizes="100vw" className={styles.bg} />
-
-        {/* ★左側の“途切れない”ストリーム（フォームより必ず下の層） */}
-        {streamEnabled && (
-          <div
-            className={styles.streamOverlay}
-            style={{
-              width: cfg.w,
-              height: cfg.h,
-              left: layout.offsetX,
-              top: layout.offsetY,
-              transform: `scale(${layout.scale})`,
-            }}
-          >
-            <LeftStream rect={cfg.stream} items={streamItems} enabled={true} />
-          </div>
-        )}
 
         {/* 右上：投稿設定 */}
-        <div style={{ position: "absolute", right: 14, top: 14, zIndex: 30 }}>
-          <button
-            type="button"
-            onClick={openMeta}
-            style={{
-              padding: "10px 12px",
-              borderRadius: 999,
-              border: "1px solid rgba(0,0,0,0.15)",
-              background: "rgba(255,255,255,0.92)",
-              backdropFilter: "blur(8px)",
-              fontWeight: 900,
-              cursor: "pointer",
-              boxShadow: "0 10px 26px rgba(0,0,0,0.12)",
-            }}
-            aria-label="投稿設定を開く"
-          >
+        <div
+          style={{
+            position: "absolute",
+            right: "calc(env(safe-area-inset-right) + 12px)",
+            top: "calc(env(safe-area-inset-top) + 12px)",
+            zIndex: 30,
+          }}
+        >
+          <button type="button" onClick={openMeta} className={styles.topPillBtn} aria-label="投稿設定を開く">
             ⚙ 投稿設定
           </button>
 
@@ -462,6 +471,7 @@ export default function ArcSuggestionBox() {
                 borderRadius: 16,
                 padding: 12,
                 boxShadow: "0 18px 50px rgba(0,0,0,0.22)",
+                zIndex: 40,
               }}
             >
               <div
@@ -518,62 +528,26 @@ export default function ArcSuggestionBox() {
           )}
         </div>
 
-        {/* 入力フォーム（画像座標系に合わせる） */}
-        <form
-          className={styles.overlay}
-          onSubmit={onSubmit}
-          style={{
-            width: cfg.w,
-            height: cfg.h,
-            left: layout.offsetX,
-            top: layout.offsetY,
-            transform: `scale(${layout.scale})`,
-          }}
-        >
+        {/* ストリーム（フォームより下） */}
+        {streamEnabled && <LeftStream rectPx={streamRectPx} items={streamItems} enabled={true} />}
+
+        {/* フォーム（縮めない。位置だけ背景に追従） */}
+        <form className={styles.overlay} onSubmit={onSubmit}>
+          {/* タイトル */}
           <h1
             className={styles.signTitle}
             style={{
-              left: cfg.title.x,
-              top: cfg.title.y,
-              width: cfg.title.w,
+              left: sx(cfg.title.x),
+              top: sy(cfg.title.y),
+              width: cfg.title.w * layout.scale,
             }}
           >
             ARC目安箱
           </h1>
 
-          <div
-            style={{
-              position: "absolute",
-              left: cfg.button.x,
-              top: optionPillTop,
-              transform: "translate(-50%, -50%)",
-              zIndex: 6,
-            }}
-          >
-            <button
-              type="button"
-              onClick={openMeta}
-              style={{
-                borderRadius: 999,
-                padding: "10px 14px",
-                border: "1px solid rgba(0,0,0,0.15)",
-                background: "rgba(255,255,255,0.86)",
-                backdropFilter: "blur(8px)",
-                fontWeight: 1000,
-                cursor: "pointer",
-                boxShadow: "0 10px 24px rgba(0,0,0,0.14)",
-                maxWidth: layout.mode === "portrait" ? 560 : 520,
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              }}
-              aria-label="投稿設定を開く"
-              title="投稿設定を開く"
-            >
-              {isAnonymous ? "匿名" : "連絡先あり"} ・ {category ? `カテゴリ: ${category}` : "カテゴリ未指定"} ▸
-            </button>
-          </div>
+          
 
+          {/* 件名 */}
           <label className={styles.srOnly} htmlFor="subject">
             件名
           </label>
@@ -584,14 +558,10 @@ export default function ArcSuggestionBox() {
             onChange={(e) => setSubject(e.target.value)}
             placeholder="件名を入力…"
             maxLength={80}
-            style={{
-              left: cfg.subject.x,
-              top: cfg.subject.y,
-              width: cfg.subject.w,
-              height: cfg.subject.h,
-            }}
+            style={rectPx(cfg.subject, { minH: 52, minW: 280 })}
           />
 
+          {/* 本文 */}
           <label className={styles.srOnly} htmlFor="body">
             本文
           </label>
@@ -602,19 +572,19 @@ export default function ArcSuggestionBox() {
             onChange={(e) => setBody(e.target.value)}
             placeholder="本文を入力…"
             maxLength={2000}
-            style={{
-              left: cfg.body.x,
-              top: cfg.body.y,
-              width: cfg.body.w,
-              height: cfg.body.h,
-            }}
+            style={rectPx(cfg.body, { minH: 240, minW: 280 })}
           />
 
+          {/* 送信 */}
           <button
             className={styles.submitBtn}
             type="submit"
             disabled={sendStatus === "sending"}
-            style={{ left: cfg.button.x, top: cfg.button.y }}
+            style={{
+              ...pointPx({ x: cfg.button.x, y: cfg.button.y }),
+              minHeight: 52,
+              minWidth: 170,
+            }}
           >
             {sendStatus === "sending" ? "送信中…" : "送信"}
           </button>
@@ -622,7 +592,7 @@ export default function ArcSuggestionBox() {
           {message && <div className={styles.toast}>{message}</div>}
         </form>
 
-        {/* 投稿設定モーダル */}
+        {/* 投稿設定モーダル（既存のまま） */}
         {showMeta && (
           <div
             onClick={closeMeta}
