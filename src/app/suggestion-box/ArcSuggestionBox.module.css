@@ -15,13 +15,46 @@
   object-position: center;
 }
 
-/* 画像座標系に合わせるオーバーレイ */
+/* フォーム：縮めない（位置だけ絶対配置で合わせる） */
 .overlay {
   position: absolute;
-  transform-origin: top left;
+  inset: 0;
   z-index: 20;
 }
 
+/* 上のピル（ホーム/投稿設定） */
+.topPill,
+.topPillBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+
+  padding: 12px 14px;
+  min-height: 44px;
+  border-radius: 999px;
+
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(10px);
+
+  font-weight: 1000;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.topPill {
+  text-decoration: none;
+  color: inherit;
+}
+
+.topPillBtn {
+  appearance: none;
+}
+
+/* タイトル（木の看板） */
 .signTitle {
   position: absolute;
   transform: translateX(-50%);
@@ -34,6 +67,7 @@
   pointer-events: none;
 }
 
+/* 画面リーダー用 */
 .srOnly {
   position: absolute;
   width: 1px;
@@ -46,43 +80,65 @@
   border: 0;
 }
 
+/* 匿名/カテゴリ ピル */
+.metaPill {
+  width: 100%;
+  border-radius: 999px;
+  padding: 12px 14px;
+  min-height: 44px;
+
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(10px);
+
+  font-weight: 1000;
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.14);
+
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
 /* =========================
-   ✅ 中央入力欄：白ベタをやめて「巻物の紙」を活かす
-   - 背景は透明（紙の質感が見える）
-   - フォーカス時だけ薄く光らせる
+   入力欄：巻物の紙を活かしつつ、スマホで読める
+   （iOSズーム回避：16px以上）
 ========================= */
+
+.subjectInput,
+.bodyInput {
+  box-sizing: border-box;
+  -webkit-appearance: none;
+  appearance: none;
+  outline: none;
+
+  background: transparent;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+
+  /* タップしやすく */
+  touch-action: manipulation;
+}
 
 .subjectInput {
   position: absolute;
   padding: 14px 16px;
-  border-radius: 12px;
 
-  /* ★ここが重要：白ベタ禁止 */
-  background: transparent;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  box-shadow: none;
-
-  outline: none;
   font-weight: 900;
-  font-size: 18px;
+  font-size: 17px;
   color: rgba(0, 0, 0, 0.86);
   caret-color: rgba(0, 0, 0, 0.9);
 
-  /* 文字の視認性を底上げ（紙の柄でも読みやすく） */
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.55);
 }
 
 .bodyInput {
   position: absolute;
   padding: 14px 16px;
-  border-radius: 12px;
 
-  /* ★ここが重要：白ベタ禁止 */
-  background: transparent;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  box-shadow: none;
-
-  outline: none;
   font-weight: 800;
   font-size: 16px;
   color: rgba(0, 0, 0, 0.86);
@@ -91,19 +147,22 @@
   resize: none;
   line-height: 1.55;
 
-  /* 文字の視認性を底上げ */
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.55);
 }
 
-/* フォーカス時だけ “薄い紙” を敷く */
+/* 少しだけ紙を敷いて視認性UP（背景は活かす） */
+.subjectInput,
+.bodyInput {
+  background: rgba(255, 255, 255, 0.06);
+}
+
 .subjectInput:focus,
 .bodyInput:focus {
   background: rgba(255, 255, 255, 0.22);
   border-color: rgba(99, 102, 241, 0.35);
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.10);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.1);
 }
 
-/* プレースホルダ */
 .subjectInput::placeholder,
 .bodyInput::placeholder {
   color: rgba(0, 0, 0, 0.35);
@@ -111,16 +170,25 @@
   text-shadow: none;
 }
 
+/* 送信ボタン：タップしやすく */
 .submitBtn {
   position: absolute;
   transform: translate(-50%, -50%);
   padding: 12px 18px;
+
+  min-height: 52px;
   border-radius: 999px;
+
   border: 1px solid rgba(0, 0, 0, 0.14);
-  background: rgba(255, 255, 255, 0.90);
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(8px);
+
   font-weight: 1000;
   cursor: pointer;
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.14);
+
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 .submitBtn:disabled {
@@ -143,21 +211,16 @@
 }
 
 /* =========================
-   ★ 左側：途切れない上→下ストリーム
+   左側：途切れない上→下ストリーム
 ========================= */
-
-.streamOverlay {
-  position: absolute;
-  transform-origin: top left;
-  z-index: 10; /* フォームより下 */
-  pointer-events: none;
-}
 
 .streamRegion {
   position: absolute;
   overflow: hidden;
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.02);
+  z-index: 10; /* フォームより下 */
+  pointer-events: none;
 }
 
 .streamRegion::after {
@@ -168,8 +231,8 @@
   background: linear-gradient(
     to right,
     rgba(0, 0, 0, 0) 0%,
-    rgba(255, 255, 255, 0.00) 70%,
-    rgba(255, 255, 255, 0.60) 100%
+    rgba(255, 255, 255, 0) 70%,
+    rgba(255, 255, 255, 0.6) 100%
   );
 }
 
@@ -185,10 +248,8 @@
   animation-iteration-count: infinite;
   animation-duration: var(--marqueeDur, 70s);
 
-  /* ★最初から流れているように見せる（ここ重要） */
   animation-delay: -18s;
 
-  /* フェードは弱め（“透明に見える”誤解を減らす） */
   -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 6%, black 94%, transparent 100%);
   mask-image: linear-gradient(to bottom, transparent 0%, black 6%, black 94%, transparent 100%);
 }
@@ -201,16 +262,20 @@
 }
 
 @keyframes marqueeDown {
-  from { transform: translateY(-50%); }
-  to   { transform: translateY(0%); }
+  from {
+    transform: translateY(-50%);
+  }
+  to {
+    transform: translateY(0%);
+  }
 }
 
 .streamCard {
   border-radius: 16px;
   padding: 12px 12px 10px;
   background: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(0, 0, 0, 0.10);
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.10);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.1);
 }
 
 .streamCardTop {

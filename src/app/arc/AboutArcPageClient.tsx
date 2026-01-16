@@ -57,7 +57,7 @@ export default function AboutArcPage() {
     { name: "事業カレンダー", path: "/arc/calendar" },
     { name: "ARC定例会", path: "/arc/conference" },
     { name: "ARC運営委員会", path: "/arc/executive-committee" },
-    { name: "ARCアンケート", path: "/polls" },
+    // { name: "ARCアンケート", path: "/polls" },
     { name: "目安箱", path: "/suggestion-box"},
     // { name: "ミニゲーム", path: "/games" },
   ];
@@ -142,7 +142,7 @@ export default function AboutArcPage() {
         </div>
 
         {/* 各セクション */}
-        <TextRightImage title="ARC総会・定例会" imgSrc="/images/sample.png" imgAlt="総会・定例会の様子">
+        <TextRightImage title="ARC総会・定例会" imgSrc="/images/ARC_02.jpg" imgAlt="総会・定例会の様子">
           <p>
             愛知ローバース会議では年に1回の年次総会と年に4回の定例会を行っています。平均60名以上が参加し、
             スカウトが情報交換や交流を行うための場として活用されています。ローバー活動に必要な情報の提供や
@@ -151,7 +151,7 @@ export default function AboutArcPage() {
           <p>また、必要に応じて愛知のローバースカウトの意思決定を行っています。</p>
         </TextRightImage>
 
-        <TextRightImage title="ARC交流会" imgSrc="/images/sample.png" imgAlt="交流会の様子">
+        <TextRightImage title="ARC交流会" imgSrc="/images/ARC_03.jpg" imgAlt="交流会の様子">
           <p>
             年に1回、野外での1泊2日の交流会を開催しています。今後一緒に活動する仲間を見つけるため、
             縦の繋がり・横のつながりを深められる交流会です。生活班を構成し、食事をとったり、
@@ -161,7 +161,7 @@ export default function AboutArcPage() {
 
         <TextRightImage
           title="ARCローバーオリエンテーション"
-          imgSrc="/images/sample.png"
+          imgSrc="/images/ARC_04.jpg"
           imgAlt="ローバーオリエンテーションの様子"
         >
           <p>
@@ -171,7 +171,7 @@ export default function AboutArcPage() {
           <p>また、ベンチャースカウトとローバースカウトの交流会を通じて、両者がつながりを築くことを目的としています。</p>
         </TextRightImage>
 
-        <TextRightImage title="ARC運営委員セミナー" imgSrc="/images/sample.png" imgAlt="運営委員セミナーの様子">
+        <TextRightImage title="ARC運営委員セミナー" imgSrc="/images/ARC_05.jpg" imgAlt="運営委員セミナーの様子">
           <p>
             年度始まりにARC運営委員と他コミュニティ運営委員を対象としたセミナーを開催しています。
             組織を運営していく上で必要な知識と心構えを学び、運営主体としての価値を共有し更なる活躍を目指しています。
@@ -179,7 +179,7 @@ export default function AboutArcPage() {
           <p>このセミナーは議長をはじめ、先輩委員が準備しセッションを展開しています。</p>
         </TextRightImage>
 
-        <TextRightImage title="その他事業の運営" imgSrc="/images/sample.png" imgAlt="各種事業の様子">
+        <TextRightImage title="その他事業の運営" imgSrc="/images/ARC_06.jpg" imgAlt="各種事業の様子">
           <p>
             県連盟事業や委託事業をARC構成員が実行委員となり、運営しています。
             「愛知ローバームート」や「愛知スカウトフォーラム」、「愛知連盟ハイアドベンチャープログラム」などなど。
