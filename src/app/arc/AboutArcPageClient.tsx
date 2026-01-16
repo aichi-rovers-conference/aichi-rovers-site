@@ -58,7 +58,7 @@ export default function AboutArcPage() {
     { name: "ARC定例会", path: "/arc/conference" },
     { name: "ARC運営委員会", path: "/arc/executive-committee" },
     // { name: "ARCアンケート", path: "/polls" },
-    { name: "目安箱", path: "/suggestion-box"},
+    { name: "目安箱", path: "/suggestion-box2"},
     // { name: "ミニゲーム", path: "/games" },
   ];
 

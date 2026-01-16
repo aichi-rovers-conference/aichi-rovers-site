@@ -533,17 +533,7 @@ export default function ArcSuggestionBox() {
 
         {/* フォーム（縮めない。位置だけ背景に追従） */}
         <form className={styles.overlay} onSubmit={onSubmit}>
-          {/* タイトル */}
-          <h1
-            className={styles.signTitle}
-            style={{
-              left: sx(cfg.title.x),
-              top: sy(cfg.title.y),
-              width: cfg.title.w * layout.scale,
-            }}
-          >
-            ARC目安箱
-          </h1>
+          
 
           
 
