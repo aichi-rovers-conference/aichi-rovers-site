@@ -6,7 +6,7 @@ import { SITE_IMAGE_SLOTS } from "@/lib/site-image-keys";
 
 export const dynamic = "force-dynamic";
 
-const VALID_KEYS = new Set(SITE_IMAGE_SLOTS.map((s) => s.key));
+const VALID_KEYS = new Set<string>(SITE_IMAGE_SLOTS.map((s) => s.key));
 
 function canEdit(session: any) {
   const role = session?.role;
