@@ -8,9 +8,8 @@ import { motion } from "framer-motion";
 import ExecAccessButton from "../components/ExecAccessButton";
 import ArcHeader1 from "../components/ArcHeader1";
 import ArcFooter from "../components/ArcFooter";
-import HeroImage from "../components/HeroImage";
-
-import sampleImg from "@/public/images/sample.png";
+import SiteHeroImage from "../components/SiteHeroImage";
+import SiteImage from "../components/SiteImage";
 
 export default function Home() {
   const [isOpen] = useState(false);
@@ -30,7 +29,8 @@ export default function Home() {
       <ArcHeader1 navItems={navItems} />
 
       {/* ★ 共通ヒーロー */}
-      <HeroImage
+      <SiteHeroImage
+        siteKey="hero.main"
         src="/images/R6-3.JPG"
         alt="Aichi Rovers Conference"
         parallaxAmount={180}
@@ -60,7 +60,7 @@ export default function Home() {
             </p>
           </motion.div>
         )}
-      </HeroImage>
+      </SiteHeroImage>
 
       {/* --- 紹介セクション --- */}
       <section className="w-full bg-white py-10 sm:py-12 md:py-16 px-4 sm:px-6 md:px-10 lg:px-16">
@@ -89,8 +89,9 @@ export default function Home() {
           </div>
 
           <div className="flex justify-center">
-            <Image
-              src="/images/home1.JPG"
+            <SiteImage
+              siteKey="home.photo1"
+              fallback="/images/home1.JPG"
               alt="ARC活動写真"
               width={520}
               height={420}
@@ -133,8 +134,9 @@ export default function Home() {
           </div>
 
           <div className="flex justify-center">
-            <Image
-              src="/images/home2.JPG"
+            <SiteImage
+              siteKey="home.photo2"
+              fallback="/images/home2.JPG"
               alt="ARC活動写真"
               width={520}
               height={420}
@@ -167,11 +169,13 @@ export default function Home() {
           </div>
 
           <div className="flex justify-center">
-            <Image
-              src="/images/home3.JPG"
+            <SiteImage
+              siteKey="home.photo3"
+              fallback="/images/home3.JPG"
               alt="ARC活動写真"
               width={520}
-              height={420}              loading="lazy"
+              height={420}
+              loading="lazy"
               sizes="(max-width: 768px) 86vw, 520px"
               className="rounded-lg shadow-lg object-cover select-none w-full max-w-[520px] h-auto"
               draggable={false}
