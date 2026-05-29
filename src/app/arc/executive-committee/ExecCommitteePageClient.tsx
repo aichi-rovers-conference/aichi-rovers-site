@@ -6,7 +6,7 @@ import Image from "next/image";
 import { motion } from "framer-motion";
 import ArcHeader1 from "@/src/components/ArcHeader1";
 import ArcFooter from "@/src/components/ArcFooter";
-import SiteHeroImage from "@/src/components/SiteHeroImage";
+import HeroImage from "@/src/components/HeroImage";
 
 /* ===== データソース ===== */
 const DATA_URL_PRIMARY = "/api/excom/members";   // まずはDB(API)
@@ -257,8 +257,7 @@ export default function ExecCommitteePage() {
       <ArcHeader1 navItems={navItems} />
 
       {/* ★ 共通ヒーロー適用 */}
-      <SiteHeroImage
-        siteKey="hero.main"
+      <HeroImage
         src="/images/R6-3.JPG"
         alt="Aichi Rovers Conference"
         heightClass="h-[40vh] sm:h-[46vh]"
@@ -281,7 +280,7 @@ export default function ExecCommitteePage() {
             Executive Committee
           </p>
         </motion.div>
-      </SiteHeroImage>
+      </HeroImage>
 
       {/* 本文：紹介テキスト */}
       <section className="w-full bg-white py-10 sm:py-12 md:py-14 px-4 sm:px-6 md:px-10 lg:px-16">
