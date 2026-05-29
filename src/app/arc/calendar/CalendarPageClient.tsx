@@ -5,7 +5,7 @@ import Image from "next/image";
 import { motion } from "framer-motion";
 import ArcHeader1 from "@/src/components/ArcHeader1";
 import ArcFooter from "@/src/components/ArcFooter";
-import SiteHeroImage from "@/src/components/SiteHeroImage";
+import HeroImage from "@/src/components/HeroImage";
 
 const EVENTS_API_URL = "/api/calendar/events";
 const RECRUIT_API_URL = "/api/calendar/recruitings";
@@ -321,8 +321,7 @@ export default function CalendarPageClient() {
     <div className="w-full bg-white">
       <ArcHeader1 navItems={navItems} />
 
-      <SiteHeroImage
-        siteKey="hero.main"
+      <HeroImage
         src="/images/R6-3.JPG"
         alt="Aichi Rovers Conference"
         heightClass="h-[40vh] sm:h-[46vh]"
@@ -342,7 +341,7 @@ export default function CalendarPageClient() {
             ARC Annual Schedule & Recruiting
           </p>
         </motion.div>
-      </SiteHeroImage>
+      </HeroImage>
 
       {/* 現在募集中（そのまま） */}
       <section className="w-full bg-white py-10 sm:py-12 md:py-14 px-4 sm:px-6 md:px-10 lg:px-16">

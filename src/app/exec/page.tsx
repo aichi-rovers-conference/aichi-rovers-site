@@ -17,7 +17,6 @@ import {
   UserCog,
   CalendarCheck,
   MessageCircleMore,
-  ImageIcon,
 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -88,31 +87,18 @@ export default async function ExecPage() {
       title: "事業カレンダー管理",
       desc: "募集と年間スケジュールの追加・編集・公開設定",
       accent: "red",
-      disabled: false,
+      disabled: false, // ← 常に有効（表示は canEditCalendar 次第）
     });
   }
 
-  // サイト写真管理：ADMIN / EDITOR / isSuper が使える
-  if (isAdmin || isSuper || session.role === "EDITOR") {
-    links.push({
-      href: "/exec/site-images",
-      icon: <ImageIcon className="size-6 md:size-7 xl:size-8" />,
-      title: "サイト写真管理",
-      desc: "ホームページ・ARCページの活動写真を差し替える",
-      accent: "green",
-      disabled: false,
-    });
-  }
-
-  // 運営委員紹介管理：ADMIN / EDITOR / isSuper が使える
-  if (isAdmin || isSuper || session.role === "EDITOR") {
+  if (isAdmin || isSuper) {
     links.push({
       href: "/exec/excom",
       icon: <ShieldCheck className="size-6 md:size-7 xl:size-8" />,
       title: "運営委員紹介管理",
       desc: "運営委員紹介ページの管理",
       accent: "blue",
-      disabled: false,
+      disabled: !isSuper,
     });
   }
 

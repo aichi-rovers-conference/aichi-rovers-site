@@ -377,10 +377,3 @@ enum EmailStatus {
   SENT
   FAILED
 }
-
-model SiteImage {
-  key       String   @id
-  url       String
-  label     String   @default("")
-  updatedAt DateTime @updatedAt
-}
