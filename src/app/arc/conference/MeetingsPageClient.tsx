@@ -6,7 +6,7 @@ import Image from "next/image";
 import { motion } from "framer-motion";
 import ArcHeader1 from "@/src/components/ArcHeader1";
 import ArcFooter from "@/src/components/ArcFooter";
-import HeroImage from "@/src/components/HeroImage";
+import SiteHeroImage from "@/src/components/SiteHeroImage";
 
 /* ===== ここだけでON/OFFできる仮置きフラグ ===== */
 const SHOW_R6_TEMP_BLOCK = true;
@@ -373,7 +373,8 @@ export default function MeetingsPage() {
       <ArcHeader1 navItems={navItems} />
 
       {/* ★ 共通ヒーロー適用（パララックス・自動blur・オーバーレイ） */}
-      <HeroImage
+      <SiteHeroImage
+        siteKey="hero.main"
         src="/images/R6-3.JPG"
         alt="Aichi Rovers Conference"
         heightClass="h-[40vh] sm:h-[46vh]"
@@ -399,7 +400,7 @@ export default function MeetingsPage() {
             ARC Regular Meetings Report
           </p>
         </motion.div>
-      </HeroImage>
+      </SiteHeroImage>
 
       {/* 本文 */}
       <section className="w-full bg-white py-10 sm:py-12 md:py-14 px-4 sm:px-6 md:px-10 lg:px-16 max-w-[100vw] overflow-x-clip">
